@@ -34,8 +34,8 @@ if __name__ == '__main__':
         "framework": "torch",
     }
 
-    trainer = PGTrainer(config)
-    trainer.train()
+    #trainer = PGTrainer(config)
+    #trainer.train()
     def policy_mapping_fn(agent_id):
         if agent_id.startswith("agent_01"):
             return "policy_01"  # Choose 01 policy for agent_01
@@ -71,13 +71,13 @@ if __name__ == '__main__':
             'clip_rewards': False,
             'vf_clip_param': 10.0,
             'entropy_coeff': 0.01,
-            'train_batch_size': 10000,
-            'sgd_minibatch_size': 500,
+            'train_batch_size': 40,
+            'sgd_minibatch_size': 40,
             'shuffle_sequences': True,
             'num_sgd_iter': 10,
             'num_workers': 0,
-            'num_envs_per_worker': 10,
-            'rollout_fragment_length': 400,
+            'num_envs_per_worker': 1,
+            'rollout_fragment_length': 10,
             'batch_mode': 'truncate_episodes',
             'observation_filter': 'NoFilter',
             'vf_share_layers': 'true',

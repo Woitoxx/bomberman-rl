@@ -163,6 +163,7 @@ class BombermanEnv(MultiAgentEnv):
             obs[agent.name] = agent.get_observation_from_game_state(agent.last_game_state)
         return obs
 
+
     def calculate_reward(self, agent: Agent):
         if not agent.dead:
             opp_score_max = max([v.score for k, v in self.agents.items() if k != agent.name])
@@ -362,3 +363,29 @@ class BombermanEnv(MultiAgentEnv):
         state['explosion_map'] = explosion_map
 
         return state
+
+    @staticmethod
+    def get_observation_from_game_state(game_state):
+        field = game_state['field']
+        walls = np.where(field == -1, 1, 0)
+        free = np.where(field == 0, 1, 0)
+        crates = np.where(field == 1, 1, 0)
+        player = np.zeros(field.shape, dtype=int)
+        player[game_state['self'][3]] = 1
+        opponents = np.zeros(field.shape, dtype=int)
+        for o in game_state['others']:
+            opponents[o[3]] = 1
+
+        coins = np.zeros(field.shape, dtype=int)
+        ind = tuple(zip(*game_state['coins']))
+        if len(ind) > 0:
+            coins[ind] = 1
+        bombs = np.zeros(field.shape)
+        game_state_bombs = game_state['bombs']
+        # ind = list(zip(*game_state['bombs']))
+        for b in game_state_bombs:
+            bombs[b[0]] = b[1]
+        explosions = game_state['explosion_map']
+        return {'walls': walls.flatten(), 'free': free.flatten(), 'crates': crates.flatten(), 'coins': coins.flatten(),
+                'bombs': bombs, 'player': player.flatten(),
+                'opponents': opponents.flatten(), 'explosions': explosions}
