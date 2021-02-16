@@ -166,10 +166,13 @@ class BombermanEnv(MultiAgentEnv):
 
     def calculate_reward(self, agent: Agent):
         if not agent.dead:
+            '''
             opp_score_max = max([v.score for k, v in self.agents.items() if k != agent.name])
             reward = agent.score - opp_score_max
+            '''
+            reward = agent.score - agent.last_game_state['self'][1]
             return reward
-        return -50.
+        return -20.
 
     def new_round(self):
         if self.running:
