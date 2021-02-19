@@ -16,8 +16,8 @@ from ray.rllib.utils.typing import MultiAgentDict
 import events as e
 import settings as s
 from fallbacks import pygame
-from items import Coin, Explosion, Bomb
-
+from training.items import Coin, Explosion, Bomb
+import uuid
 
 class Agent:
     def __init__(self, agent_name):
@@ -32,6 +32,7 @@ class Agent:
         self.x = None
         self.y = None
         self.bombs_left = None
+        self.is_suicide_bomber = False
 
         self.last_game_state = None
         self.last_action = None
@@ -45,6 +46,7 @@ class Agent:
         self.trophies = []
 
         self.bombs_left = True
+        self.is_suicide_bomber = False
 
         self.last_game_state = None
         self.last_action = None
@@ -60,7 +62,7 @@ class Agent:
 
     def store_game_state(self, game_state):
         self.last_game_state = game_state
-
+"""
     def get_observation_from_game_state(self, game_state):
         field = game_state['field']
         walls = np.where(field == -1, 1, 0)
@@ -82,9 +84,13 @@ class Agent:
         for b in game_state_bombs:
             bombs[b[0]] = b[1]
         explosions = game_state['explosion_map']
-        return {'walls': walls.flatten(), 'free': free.flatten(), 'crates': crates.flatten(), 'coins': coins.flatten(), 'bombs': bombs, 'player': player.flatten(),
-                'opponents': opponents.flatten(), 'explosions': explosions}
+        return np.stack(
+            (walls, free, crates, coins, bombs, player, opponents, explosions), axis=2
+        )
+        #{'walls': walls, 'free': free, 'crates': crates, 'coins': coins, 'bombs': bombs, 'player': player,
+        #        'opponents': opponents, 'explosions': explosions}
 
+"""
 
 class BombermanEnv(MultiAgentEnv):
     running: bool = False
@@ -103,19 +109,21 @@ class BombermanEnv(MultiAgentEnv):
         self.round = 0
         self.running = False
         self.agents = {}
-        tiles = 17 * 17
-        self.observation_space = spaces.Dict({'walls': spaces.MultiBinary(tiles),
-                                              'free': spaces.MultiBinary(tiles),
-                                              'crates': spaces.MultiBinary(tiles),
-                                              'player': spaces.MultiBinary(tiles),
-                                              'opponents': spaces.MultiBinary(tiles),
-                                              'coins': spaces.MultiBinary(tiles),
-                                              'bombs': spaces.Box(low=0, high=4, shape=(17, 17)),
-                                              'explosions': spaces.Box(low=0, high=2, shape=(17, 17))
-                                              })
+        self.phase = 0
+        tiles = (17, 17)
+        self.observation_space = spaces.Box(low=0, high=4, shape=(17,17,8))
+                                    #spaces.Dict({'walls': spaces.MultiBinary(tiles),
+                                    #          'free': spaces.MultiBinary(tiles),
+                                    #          'crates': spaces.MultiBinary(tiles),
+                                    #          'player': spaces.MultiBinary(tiles),
+                                    #          'opponents': spaces.MultiBinary(tiles),
+                                    #          'coins': spaces.MultiBinary(tiles),
+                                    #          'bombs': spaces.Box(low=0, high=4, shape=(17, 17)),
+                                    #          'explosions': spaces.Box(low=0, high=2, shape=(17, 17))
+                                    #          })
         self.action_space = spaces.Discrete(6)
         for i in range(num_agents):
-            agent_id = f'agent_{i}'
+            agent_id = f'agent_{i}_{uuid.uuid1()}'
             self.agents[agent_id] = Agent(agent_id)
         self.new_round()
 
@@ -138,18 +146,18 @@ class BombermanEnv(MultiAgentEnv):
 
         for agent_name in action_dict.keys():
             agent = self.agents[agent_name]
+            rewards[agent.name] = self.calculate_reward(agent, self.available_actions[action_dict[agent.name]])
             agent.store_game_state(self.get_state_for_agent(agent))
             dones[agent_name] = self.agents[agent_name].dead
-            rewards[agent.name] = self.calculate_reward(agent)
-            obs[agent.name] = agent.get_observation_from_game_state(agent.last_game_state)
+            obs[agent.name] = self.get_observation_from_game_state(agent.last_game_state)
 
         if self.done():
             self.end_round()
             dones['__all__'] = True
             for agent_name in action_dict.keys():
                 agent = self.agents[agent_name]
-                obs[agent.name] = agent.get_observation_from_game_state(agent.last_game_state)
-                rewards[agent.name] = self.calculate_reward(agent)
+                obs[agent.name] = self.get_observation_from_game_state(agent.last_game_state)
+                rewards[agent.name] = self.calculate_reward(agent, self.available_actions[action_dict[agent.name]])
         else:
             dones['__all__'] = False
 
@@ -160,19 +168,37 @@ class BombermanEnv(MultiAgentEnv):
         self.new_round()
         for agent in self.active_agents:
             agent.store_game_state(self.get_state_for_agent(agent))
-            obs[agent.name] = agent.get_observation_from_game_state(agent.last_game_state)
+            obs[agent.name] = self.get_observation_from_game_state(agent.last_game_state)
         return obs
 
 
-    def calculate_reward(self, agent: Agent):
+    def calculate_reward(self, agent: Agent, action=None):
         if not agent.dead:
+            if action and self.phase == 0:
+                reward = agent.score - agent.last_game_state['self'][1]
+                return reward if reward > 0 else (0.01 if action == 'BOMB' else 0)
             '''
             opp_score_max = max([v.score for k, v in self.agents.items() if k != agent.name])
             reward = agent.score - opp_score_max
             '''
-            reward = agent.score - agent.last_game_state['self'][1]
-            return reward
-        return -20.
+            if self.phase == 1:
+                reward = agent.score - agent.last_game_state['self'][1]
+                return reward# if reward > 0 else -0.0025
+            return 0.
+        else:
+            if self.phase == 0:
+                if agent.is_suicide_bomber:
+                    return 0#(self.current_step / 400.)-1
+                else:
+                    return 0
+            elif self.phase == 1:
+                if agent.is_suicide_bomber:
+                    return -5
+                else:
+                    return 0
+
+    def set_phase(self, phase):
+        self.phase = phase
 
     def new_round(self):
         if self.running:
@@ -311,7 +337,7 @@ class BombermanEnv(MultiAgentEnv):
             if explosion.timer > 1:
                 for a in self.active_agents:
                     if (not a.dead) and (a.x, a.y) in explosion.blast_coords:
-                        agents_hit.add(a)
+                        agents_hit.add((a,explosion.owner))
                         # Note who killed whom, adjust scores
                         if a is not explosion.owner:
                             explosion.owner.update_score(s.REWARD_KILL)
@@ -321,9 +347,11 @@ class BombermanEnv(MultiAgentEnv):
 
             # Progress countdown
             explosion.timer -= 1
-        for a in agents_hit:
+        for a, o in agents_hit:
             a.dead = True
             self.active_agents.remove(a)
+            if a == o:
+                a.is_suicide_bomber = True
         self.explosions = [exp for exp in self.explosions if exp.active]
 
     def end_round(self):
@@ -389,6 +417,5 @@ class BombermanEnv(MultiAgentEnv):
         for b in game_state_bombs:
             bombs[b[0]] = b[1]
         explosions = game_state['explosion_map']
-        return {'walls': walls.flatten(), 'free': free.flatten(), 'crates': crates.flatten(), 'coins': coins.flatten(),
-                'bombs': bombs, 'player': player.flatten(),
-                'opponents': opponents.flatten(), 'explosions': explosions}
+        out = np.stack((walls, free, crates, coins, bombs, player, opponents, explosions), axis=2)
+        return out
