@@ -28,6 +28,16 @@ class MyCallbacks(DefaultCallbacks):
         #pole_angle = np.mean(episode.user_data["pole_angles"])
         #print("episode {} ended with length {} and pole angles {}".format(
         #    episode.episode_id, episode.length, pole_angle))
+        #winner, loser = worker.env.get_winner_loser()
+        #for k in episode.agent_rewards:
+        #    if k[0] in winner:
+        #        episode.agent_rewards[k] = 1.
+        #        episode.total_reward += 1
+        #        episode._agent_reward_history[k[0]][-1] = 1
+        #    elif k[0] in loser:
+        #        episode.agent_rewards[k] = -1 / 3.
+        #        episode.total_reward -= 1/3.
+        #        episode._agent_reward_history[k[0]][-1] = -1/3.
         pass
 
     def on_sample_end(self, worker: RolloutWorker, samples: SampleBatch,
@@ -47,8 +57,9 @@ class MyCallbacks(DefaultCallbacks):
             agent_id: str, policy_id: str, policies: Dict[str, Policy],
             postprocessed_batch: SampleBatch,
             original_batches: Dict[str, SampleBatch], **kwargs):
-        winner, loser = worker.env.get_winner_loser()
-        if agent_id in winner:
-            postprocessed_batch.data['rewards'][-1] = 1.
-        elif agent_id in loser:
-            postprocessed_batch.data['rewards'][-1] = -1/3.
+        #winner, loser = worker.env.get_winner_loser()
+        #if agent_id in winner:
+        #    postprocessed_batch.data['rewards'][-1] = 1.
+        #elif agent_id in loser:
+        #    postprocessed_batch.data['rewards'][-1] = -1/3.
+        pass
