@@ -80,7 +80,7 @@ if __name__ == '__main__':
         global phase
         current_policy = None
         trainer = PPOTrainer(config=config, env='BomberMan-v0')
-        #trainer.restore('C:\\Users\\Florian\\ray_results\\PPO_BomberMan-v0_2021-02-26_10-27-236_0zm6bh\\checkpoint_820\\checkpoint-820')
+        trainer.restore('C:\\Users\\Florian\\ray_results\\PPO_BomberMan-v0_2021-02-28_15-34-57we64cvop\\checkpoint_2430\\checkpoint-2430')
         iter = 1
 
         def update_policies(policy, policyID):
@@ -94,8 +94,8 @@ if __name__ == '__main__':
         def update_phase(ev):
             ev.foreach_env(lambda e: e.set_phase(phase))
 
-        phase = 1
-        if phase == 1:
+        phase = 0
+        if phase == 0:
             trainer.workers.foreach_worker(update_phase)
             current_policy = trainer.get_policy("policy_01").get_weights()
             model_pool.append(copy.deepcopy(current_policy))
@@ -124,13 +124,12 @@ if __name__ == '__main__':
                 else:
                     print("model already saved")
             #reporter(**result)
-            if phase == 1:
+            if phase >= 0:
                 current_policy = trainer.get_policy("policy_01").get_weights()
                 #if result["policy_reward_mean"]["policy_01"] > 0.02 or len(model_pool) < 10:
-                if iter > 0:
-                    model_pool.append(copy.deepcopy(current_policy))
-                    if len(model_pool) > 50:
-                        model_pool.pop(0)
+                model_pool.append(copy.deepcopy(current_policy))
+                if len(model_pool) > 100:
+                    model_pool.pop(0)
                 trainer.workers.foreach_worker(update_policies_worker)
             '''
             if phase == 1 and result["policy_reward_mean"]["policy_01"] > 2:
@@ -139,7 +138,13 @@ if __name__ == '__main__':
                 trainer.workers.foreach_worker(update_phase)
             '''
 
-            if phase == 0 and result["policy_reward_mean"]["policy_01"] > 4:
+            if phase == 1 and result["policy_reward_mean"]["policy_01"] > 3:
+                print(f'Phase 2 now.')
+                phase = 2
+                trainer.workers.foreach_worker(update_phase)
+                trainer.config['gamma'] = 0.995
+
+            if phase == 0 and result["policy_reward_mean"]["policy_01"] > 3.5:
                 print(f'Phase 1 now.')
                 phase = 1
                 trainer.workers.foreach_worker(update_phase)
@@ -233,7 +238,7 @@ if __name__ == '__main__':
             'batch_mode': 'truncate_episodes',
             'observation_filter': 'NoFilter',
             'num_gpus': 1,
-            'lr': 1e-4,
+            'lr': 3e-4,
             'log_level': 'INFO',
             'framework': 'tf',
             #'simple_optimizer': args.simple,
@@ -248,9 +253,7 @@ if __name__ == '__main__':
                 'policy_mapping_fn': policy_mapping_fn,
             },
         },
-        stop={'training_iteration': 2000},
         resources_per_trial={'gpu': 1},
-
     )
     '''
 

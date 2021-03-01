@@ -3,6 +3,7 @@ import pickle
 import random
 from collections import namedtuple
 from datetime import datetime
+from itertools import chain
 from logging.handlers import RotatingFileHandler
 from os.path import dirname
 from threading import Event
@@ -153,19 +154,19 @@ class BombermanEnv(MultiAgentEnv):
 
         random.shuffle(self.active_agents)
         for agent in self.active_agents:
-            agent.step_reward = 0
+            #agent.step_reward = 0
             self.perform_agent_action(agent, self.available_actions[action_dict[agent.name]])
 
         self.collect_coins()
         self.update_bombs()
         self.evaluate_explosions()
-        self.update_step_rewards(action_dict.keys())
+        #self.update_step_rewards(action_dict.keys())
 
         for agent_name in action_dict.keys():
             agent = self.agents[agent_name]
-            rewards[agent.name] = agent.step_reward# self.calculate_reward(agent)
-            agent.step_reward = 0
-            agent.aux_score = 0
+            rewards[agent.name] = self.calculate_reward(agent)#agent.step_reward#
+            #agent.step_reward = 0
+            #agent.aux_score = 0
             agent.crates_destroyed = 0
             agent.store_game_state(self.get_state_for_agent(agent))
             dones[agent_name] = self.agents[agent_name].dead
@@ -177,18 +178,16 @@ class BombermanEnv(MultiAgentEnv):
             dones['__all__'] = True
             #score_max = max([v.score for k, v in self.agents.items()])
             #players_with_max_score = len([k for k, v in self.agents.items() if v.score == score_max])
-            #w, l = self.get_winner_loser()
-            for agent_name in action_dict.keys():
-                agent = self.agents[agent_name]
-                #opp_score_max = max([v.score for k, v in self.agents.items() if k != agent_name])
-                #rewards[agent_name] = rewards[agent.name]+(agent.score - opp_score_max) / 10.
-                '''
-                if agent_name in w:
-                    rewards[agent_name] = 1.
-                elif agent_name in l:
-                    rewards[agent_name] = -1/3.
-                else:
-                    rewards[agent_name] = 0.'''
+            if self.phase == 2:
+                w, l = self.get_winner_loser()
+                for agent_name in action_dict.keys():
+                    #agent = self.agents[agent_name]
+                    #opp_score_max = max([v.score for k, v in self.agents.items() if k != agent_name])
+                    #rewards[agent_name] = rewards[agent.name]+(agent.score - opp_score_max) / 10.
+                    if agent_name in w:
+                        rewards[agent_name] += 1.
+                    elif agent_name in l:
+                        rewards[agent_name] -= 1.
         else:
             dones['__all__'] = False
 
@@ -211,45 +210,20 @@ class BombermanEnv(MultiAgentEnv):
     def calculate_reward(self, agent: Agent):
         if not agent.dead:
             if self.phase == 0:
-                reward = (agent.score - agent.last_game_state['self'][1]) / 10.
-                reward += (agent.crates_destroyed / 100.)
+                reward = (agent.score - agent.last_game_state['self'][1]) * 0.9
+                reward += agent.crates_destroyed * 0.1
                 return reward
             if self.phase == 1:
-                reward = (agent.score - agent.last_game_state['self'][1]) / 10.
+                reward = (agent.score - agent.last_game_state['self'][1])
                 return reward
-            #if self.phase == 1:
-            #    reward = (agent.score - agent.last_game_state['self'][1])
-            #    return reward
-            '''
-            opp_score_max = max([v.score for k, v in self.agents.items() if k != agent.name])
-            reward = agent.score - opp_score_max
-            '''
-
-            #if self.phase == 1:
-            #    reward = (agent.score - agent.last_game_state['self'][1])
-                #opp_score_max = max([v.score for k, v in self.agents.items() if k != agent.name])
-            #    return reward# if reward > 0 else -0.0025
-
             return 0.
         else:
-            # return -0.0025 * (401 - self.current_step) - 1
-            '''
-              if agent.is_suicide_bomber:
-                  return 0#self.current_step / 400.)-1
-              else:
-                  return 0
-              
-            elif self.phase == 1:
-              if agent.is_suicide_bomber:
-                  return -5
-              else:
-                  return 0
-            '''
-            if self.phase == 1:
+            if self.phase == 2:
                 if not agent.is_suicide_bomber:
-                    opp_score_max = max([v.score for k, v in self.agents.items() if k != agent.name])
-                    reward = (agent.score - opp_score_max)/10.
-                    return reward
+                    return -5.
+            #    if not agent.is_suicide_bomber:
+            #        opp_score_max = max([v.score for k, v in self.agents.items() if k != agent.name])
+            #        reward = (agent.score - opp_score_max)/10.
             #        return reward
             return 0.
 
@@ -352,7 +326,7 @@ class BombermanEnv(MultiAgentEnv):
                     if a.x == coin.x and a.y == coin.y:
                         coin.collectable = False
                         a.update_score(s.REWARD_COIN)
-                        a.aux_score += 1
+                        #a.aux_score += 1
 
     def update_bombs(self):
         """
@@ -375,7 +349,7 @@ class BombermanEnv(MultiAgentEnv):
                             if (c.x, c.y) == (x, y):
                                 c.collectable = True
                         bomb.owner.crates_destroyed += 1
-                        bomb.owner.aux_score += 0.1
+                        #bomb.owner.aux_score += 0.1
 
                 # Create explosion
                 screen_coords = [(s.GRID_OFFSET[0] + s.GRID_SIZE * x, s.GRID_OFFSET[1] + s.GRID_SIZE * y) for (x, y) in
@@ -400,7 +374,7 @@ class BombermanEnv(MultiAgentEnv):
                         # Note who killed whom, adjust scores
                         if a is not explosion.owner:
                             explosion.owner.update_score(s.REWARD_KILL)
-                            explosion.owner.aux_score+=5
+                            #explosion.owner.aux_score+=5
                         else:
                             a.is_suicide_bomber = True
             # Show smoke for a little longer
@@ -413,8 +387,8 @@ class BombermanEnv(MultiAgentEnv):
         for a in agents_hit:
             a.dead = True
             self.active_agents.remove(a)
-            if not last_man_standing:
-                a.aux_score -= 1
+            #if not last_man_standing:
+            #    a.aux_score -= 1
         self.explosions = [exp for exp in self.explosions if exp.active]
 
     def end_round(self):
@@ -471,28 +445,33 @@ class BombermanEnv(MultiAgentEnv):
 
         return state
 
-    @staticmethod
-    def get_observation_from_game_state(game_state, current_round):
+    def get_observation_from_game_state(self, game_state, current_round):
         field = game_state['field']
         walls = np.where(field == -1, 1, 0)[1:-1, 1:-1]
         free = np.where(field == 0, 1, 0)[1:-1, 1:-1]
         crates = np.where(field == 1, 1, 0)[1:-1, 1:-1]
 
         player = np.zeros(field.shape, dtype=int)
-        if not game_state['self'][4]:
-            player[game_state['self'][3]] = 1
+        player[game_state['self'][3]] = 1
         player = player[1:-1, 1:-1]
-        scores = np.zeros(4)
-        scores[0] = game_state['self'][1]
+
+        #scores = np.zeros(4)
+        #scores[0] = game_state['self'][1]
+        scores = {game_state['self'][0]: 0}
+        scores.update({a.name: 0 for a in self.agents.values() if a.name != game_state['self'][0]})
+        alives = {a.name: 0 for a in self.agents.values() if a.name != game_state['self'][0]}
+        scores[game_state['self'][0]] = game_state['self'][1]
 
         opponents = np.zeros(field.shape, dtype=int)
-        opp_alive = np.zeros(3)
+        #opp_alive = np.zeros(3)
         for i, o in enumerate(game_state['others']):
             opponents[o[3]] = 1
-            opp_alive[i] = 1
-            scores[i + 1] = o[1]
+            #opp_alive[i] = 1
+            alives[o[0]] = 1
+            #scores[i + 1] = o[1]
+            scores[o[0]] = o[1]
+        #score_alive[game_state[0]] = (1, game_state['self'][1])
         opponents = opponents[1:-1, 1:-1]
-
         coins = np.zeros(field.shape, dtype=int)
         for c in game_state['coins']:
             coins[c] = 1
@@ -509,4 +488,4 @@ class BombermanEnv(MultiAgentEnv):
         out = np.stack((walls, free, crates, coins, bombs / 4., player, opponents, explosions / 2.), axis=2)
         # out = {'walls': walls, 'free': free, 'crates': crates, 'coins': coins, 'bombs': bombs, 'player': player,
         #        'opponents': opponents, 'explosions': explosions, 'scores': scores / 100., 'current_round': np.array([current_round / 400.])}
-        return out, scores /100., opp_alive, np.array([current_round / 400.])
+        return out, np.array([score for score in scores.values()]) / 24., np.array([alive for alive in alives.values()]), np.array([current_round / 400.])
