@@ -121,7 +121,7 @@ class BombermanEnv(MultiAgentEnv):
         self.running = False
         self.agents = {}
         self.phase = 0
-        self.observation_space = spaces.Tuple((spaces.Box(low=0, high=1, shape=(15, 15, 9)),
+        self.observation_space = spaces.Tuple((spaces.Box(low=0, high=1, shape=(15, 15, 8)),
                                                spaces.Box(low=0, high=1, shape=(4,)),
                                                spaces.MultiBinary(3),
                                                spaces.Box(low=0, high=1, shape=(1,))))
@@ -185,7 +185,7 @@ class BombermanEnv(MultiAgentEnv):
                     #opp_score_max = max([v.score for k, v in self.agents.items() if k != agent_name])
                     #rewards[agent_name] = rewards[agent.name]+(agent.score - opp_score_max) / 10.
                     if agent_name in w:
-                        rewards[agent_name] += 3.
+                        rewards[agent_name] += 1.
                     elif agent_name in l:
                         rewards[agent_name] -= 1.
         else:
@@ -210,7 +210,7 @@ class BombermanEnv(MultiAgentEnv):
     def calculate_reward(self, agent: Agent):
         if not agent.dead:
             if self.phase == 0:
-                reward = (agent.score - agent.last_game_state['self'][1]) * 0.8
+                reward = (agent.score - agent.last_game_state['self'][1]) * 0.9
                 reward += agent.crates_destroyed * 0.1
                 return reward
             if self.phase == 1:
@@ -487,9 +487,7 @@ class BombermanEnv(MultiAgentEnv):
 
         explosions = game_state['explosion_map'][1:-1, 1:-1]
 
-        all_ones = np.ones_like(free)
-
-        out = np.stack((walls, free, crates, coins, bombs / 4., player, opponents, explosions / 2., all_ones), axis=2)
+        out = np.stack((walls, free, crates, coins, bombs / 4., player, opponents, explosions / 2.), axis=2)
         # out = {'walls': walls, 'free': free, 'crates': crates, 'coins': coins, 'bombs': bombs, 'player': player,
         #        'opponents': opponents, 'explosions': explosions, 'scores': scores / 100., 'current_round': np.array([current_round / 400.])}
         return out, np.array([score for score in scores.values()]) / 24., np.array([alive for alive in alives.values()]), np.array([current_round / 400.])

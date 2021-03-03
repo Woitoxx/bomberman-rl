@@ -3,6 +3,7 @@ import os
 import random
 
 import ray
+from ray.rllib.agents.impala import ImpalaTrainer
 from ray.rllib.agents.ppo import PPOTrainer
 from ray.rllib.models import ModelCatalog
 from ray.tune import Callback
@@ -28,18 +29,14 @@ if __name__ == '__main__':
         #if phase == 0:
         #    return "policy_01"
         #else:
-        if agent_id.startswith("agent_0") or np.random.rand() > 0.2:
+        if agent_id.startswith("agent_0"):
             return "policy_01"  # Choose 01 policy for agent_01
-        else:
-            return f'policy_{np.random.randint(2,12):02d}'
-        '''
         if agent_id.startswith("agent_1"):
             return "policy_02"
         if agent_id.startswith("agent_2"):
             return "policy_03"
         if agent_id.startswith("agent_3"):
             return "policy_04"
-        '''
         #else:
         #    return np.random.choice(["policy_01", "policy_02", "policy_03", "policy_04"], 1,
         #                            p=[.8, .067, .067, .066])[0]
@@ -54,17 +51,20 @@ if __name__ == '__main__':
         dest_policy.set_weights(P0key_P1val)
 
     def train(config, checkpoint_dir=None):
+        model_pool = []
         global phase
         current_policy = None
-        trainer = PPOTrainer(config=config, env='BomberMan-v0')
-        trainer.restore('C:\\Users\\Florian\\ray_results\\PPO_BomberMan-v0_2021-03-03_14-01-29vzgtmiq9\\checkpoint_550\\checkpoint-550')
-        iter = 0
+        trainer = ImpalaTrainer(config=config, env='BomberMan-v0')
+        #trainer.restore('C:\\Users\\Florian\\ray_results\\PPO_BomberMan-v0_2021-02-28_15-34-57we64cvop\\checkpoint_2430\\checkpoint-2430')
+        iter = 1
 
-        def update_policies_worker(ev, policyID=None):
-            if policyID is not None:
-                copy_weights(current_policy, ev.get_policy(policyID))
-            else:
-                ev.foreach_policy(lambda p, pid: copy_weights(current_policy, p))
+        def update_policies(policy, policyID):
+            if policyID != "policy_01":
+                new_policy = current_policy if random.random() > 0.2 else random.choice(model_pool)
+                copy_weights(new_policy, policy)
+
+        def update_policies_worker(ev):
+            ev.foreach_policy(update_policies)
 
         def update_phase(ev):
             ev.foreach_env(lambda e: e.set_phase(phase))
@@ -73,6 +73,7 @@ if __name__ == '__main__':
         if phase == 0:
             trainer.workers.foreach_worker(update_phase)
             current_policy = trainer.get_policy("policy_01").get_weights()
+            model_pool.append(copy.deepcopy(current_policy))
             trainer.workers.foreach_worker(update_policies_worker)
 
         '''
@@ -87,7 +88,6 @@ if __name__ == '__main__':
         else:
             print("Model already saved.")
         while True:
-            iter += 1
             result = trainer.train()
             if iter % 10 == 0:
                 checkpoint = trainer.save()
@@ -98,11 +98,13 @@ if __name__ == '__main__':
                 else:
                     print("model already saved")
             #reporter(**result)
-            if phase >= 0 and iter % 5 == 0:
+            if phase >= 0:
                 current_policy = trainer.get_policy("policy_01").get_weights()
-                policy_to_update = f'policy_{(iter//5)%10+2:02d}'
-                print(f'Updating policy {policy_to_update}')
-                trainer.workers.foreach_worker(lambda w: update_policies_worker(w,policy_to_update))
+                #if result["policy_reward_mean"]["policy_01"] > 0.02 or len(model_pool) < 10:
+                model_pool.append(copy.deepcopy(current_policy))
+                if len(model_pool) > 100:
+                    model_pool.pop(0)
+                trainer.workers.foreach_worker(update_policies_worker)
             '''
             if phase == 1 and result["policy_reward_mean"]["policy_01"] > 2:
                 print(f'Phase 2 now.')
@@ -114,34 +116,51 @@ if __name__ == '__main__':
                 print(f'Phase 2 now.')
                 phase = 2
                 trainer.workers.foreach_worker(update_phase)
-                #trainer.config['gamma'] = 0.995
+                trainer.config['gamma'] = 0.995
 
             if phase == 0 and result["policy_reward_mean"]["policy_01"] > 3.5:
                 print(f'Phase 1 now.')
                 phase = 1
                 trainer.workers.foreach_worker(update_phase)
-    '''
+            iter += 1
+
     train(config={
         'env': 'BomberMan-v0',
-            "use_critic": True,
-            'callbacks': MyCallbacks,
-            "use_gae": True,
-            'lambda': 0.95,
-            'gamma': 0.99,
-            'kl_coeff': 0.2,
-            'clip_rewards': False,
-            'entropy_coeff': 0.001,
-            'train_batch_size': 16384,
-            'sgd_minibatch_size': 64,
-            'shuffle_sequences': True,
-            'num_sgd_iter': 6,
-            'num_cpus_per_worker': 4,
-            'num_workers': 2,
-            'ignore_worker_failures': True,
-            'num_envs_per_worker': 1,
-            #"model": {
-            #    "fcnet_hiddens": [512, 512],
-            #},
+            "vtrace": True,
+            "vtrace_clip_rho_threshold": 1.0,
+            "vtrace_clip_pg_rho_threshold": 1.0,
+            "rollout_fragment_length": 1024,
+            "train_batch_size": 4096,
+            "min_iter_time_s": 10,
+            "num_workers": 0,
+            "num_envs_per_worker" : 4,
+            "num_gpus": 1,
+            "num_data_loader_buffers": 1,
+            "minibatch_buffer_size": 1,
+            "num_sgd_iter": 1,
+            "replay_proportion": 0.0,
+            "replay_buffer_num_slots": 0,
+            "learner_queue_size": 16,
+            "learner_queue_timeout": 300,
+            "max_sample_requests_in_flight_per_worker": 2,
+            "broadcast_interval": 1,
+            "num_aggregation_workers": 0,
+            "grad_clip": 40.0,
+            "opt_type": "adam",
+            "lr": 0.0005,
+            "lr_schedule": None,
+            # rmsprop considered
+            "decay": 0.99,
+            "momentum": 0.0,
+            "epsilon": 0.1,
+            # balancing the three losses
+            "vf_loss_coeff": 0.5,
+            "entropy_coeff": 0.01,
+            "entropy_coeff_schedule": None,
+
+            # Callback for APPO to use to update KL, target network periodically.
+            # The input to the callback is the learner fetches dict.
+            "after_train_step": None,
             "model": {
                 "custom_model": "custom_model",
                 "dim": 15, "conv_filters": [[48, [5, 5], 2], [64, [3, 3], 2], [64, [3, 3], 2]],
@@ -151,24 +170,22 @@ if __name__ == '__main__':
                      # "fcnet_hiddens": [256,256],
                 # "vf_share_layers": 'true'
                  },
-            'rollout_fragment_length': 512,
-            'batch_mode': 'complete_episodes',
-            'observation_filter': 'NoFilter',
-            'num_gpus': 1,
-            'lr': 3e-4,
+
             'log_level': 'INFO',
             'framework': 'tf',
-            #'simple_optimizer': args.simple,
             'multiagent': {
                 "policies": {
-                    f"policy_{p:02d}": (None, env.observation_space, env.action_space, {}) for p in range(50)
+                    "policy_01": (None, env.observation_space, env.action_space, {}),
+                    "policy_02": (None, env.observation_space, env.action_space, {}),
+                    "policy_03": (None, env.observation_space, env.action_space, {}),
+                    "policy_04": (None, env.observation_space, env.action_space, {})
                 },
                 "policies_to_train": ["policy_01"],
                 'policy_mapping_fn':
                     policy_mapping_fn,
             },
     }, )
-    '''
+
     tune.run(
         train,
         name='PPO',
@@ -178,18 +195,18 @@ if __name__ == '__main__':
             'callbacks': MyCallbacks,
             "use_gae": True,
             'lambda': 0.95,
-            'gamma': 0.995,
+            'gamma': 0.99,
             'kl_coeff': 0.2,
             'clip_rewards': False,
             'entropy_coeff': 0.003,
-            'train_batch_size': 8192,
+            'train_batch_size': 32768,
             'sgd_minibatch_size': 64,
             'shuffle_sequences': True,
-            'num_sgd_iter': 5,
-            'num_workers': 4,
-            #'num_cpus_per_worker': 1,
+            'num_sgd_iter': 6,
+            'num_workers': 0,
+            'num_cpus_per_worker': 4,
             'ignore_worker_failures': True,
-            'num_envs_per_worker': 4,
+            'num_envs_per_worker': 32,
             #"model": {
             #    "fcnet_hiddens": [512, 512],
             #},
@@ -202,8 +219,8 @@ if __name__ == '__main__':
                      # "fcnet_hiddens": [256,256],
                 # "vf_share_layers": 'true'
                  },
-            'rollout_fragment_length': 512,
-            'batch_mode': 'truncate_episodes',
+            'rollout_fragment_length': 1024,
+            'batch_mode': 'complete_episodes',
             'observation_filter': 'NoFilter',
             'num_gpus': 1,
             'lr': 3e-4,
@@ -212,7 +229,10 @@ if __name__ == '__main__':
             #'simple_optimizer': args.simple,
             'multiagent': {
                 "policies": {
-                    f"policy_{p:02d}": (None, env.observation_space, env.action_space, {}) for p in range(1, 12)
+                    "policy_01": (None, env.observation_space, env.action_space, {}),
+                    "policy_02": (None, env.observation_space, env.action_space, {}),
+                    "policy_03": (None, env.observation_space, env.action_space, {}),
+                    "policy_04": (None, env.observation_space, env.action_space, {})
                 },
                 "policies_to_train": ["policy_01"],
                 'policy_mapping_fn': policy_mapping_fn,
