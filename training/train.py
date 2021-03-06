@@ -1,7 +1,4 @@
-import copy
 import os
-import random
-
 import ray
 from ray.rllib.agents.ppo import PPOTrainer
 from ray.rllib.models import ModelCatalog
@@ -12,7 +9,6 @@ from training.tfnet import ComplexInputNetwork
 
 
 if __name__ == '__main__':
-    #tf.config.experimental.set_memory_growth(tf.config.list_physical_devices('GPU')[0], True)
     ray.init(
         _redis_max_memory=1024 * 1024 * 100,num_gpus=1, num_cpus=5, object_store_memory=10*2**30)
     env = BombermanEnv([f'agent_{i}' for i in range(4)])

@@ -1,24 +1,13 @@
-import logging
-import pickle
 import random
-from collections import namedtuple
 from datetime import datetime
-from itertools import chain
-from logging.handlers import RotatingFileHandler
-from os.path import dirname
-from threading import Event
-from time import time
-from typing import List, Union, Tuple
+from typing import List, Tuple
 import numpy as np
 from gym import spaces
 from ray.rllib import MultiAgentEnv
 from ray.rllib.utils.typing import MultiAgentDict
 
-import events as e
 import settings as s
-from fallbacks import pygame
 from training.items import Coin, Explosion, Bomb
-import uuid
 
 
 class Agent:
@@ -72,37 +61,6 @@ class Agent:
         self.last_game_state = game_state
 
 
-"""
-    def get_observation_from_game_state(self, game_state):
-        field = game_state['field']
-        walls = np.where(field == -1, 1, 0)
-        free = np.where(field == 0, 1, 0)
-        crates = np.where(field == 1, 1, 0)
-        player = np.zeros(field.shape, dtype=int)
-        player[self.x, self.y] = 1
-        opponents = np.zeros(field.shape, dtype=int)
-        for o in game_state['others']:
-            opponents[o[3]] = 1
-
-        coins = np.zeros(field.shape, dtype=int)
-        ind = tuple(zip(*game_state['coins']))
-        if len(ind)>0:
-            coins[ind] = 1
-        bombs = np.zeros(field.shape)
-        game_state_bombs = game_state['bombs']
-        #ind = list(zip(*game_state['bombs']))
-        for b in game_state_bombs:
-            bombs[b[0]] = b[1]
-        explosions = game_state['explosion_map']
-        return np.stack(
-            (walls, free, crates, coins, bombs, player, opponents, explosions), axis=2
-        )
-        #{'walls': walls, 'free': free, 'crates': crates, 'coins': coins, 'bombs': bombs, 'player': player,
-        #        'opponents': opponents, 'explosions': explosions}
-
-"""
-
-
 class BombermanEnv(MultiAgentEnv):
     running: bool = False
     current_step: int
@@ -152,52 +110,48 @@ class BombermanEnv(MultiAgentEnv):
 
         self.current_step += 1
 
+        # Determine which agent gets to act first
         random.shuffle(self.active_agents)
+
         for agent in self.active_agents:
-            #agent.step_reward = 0
             self.perform_agent_action(agent, self.available_actions[action_dict[agent.name]])
 
+        # Update arena after handling actions from agents
         self.collect_coins()
         self.update_bombs()
         self.evaluate_explosions()
-        #self.update_step_rewards(action_dict.keys())
 
+        # Set obs, reward, done, info for agents still alive
+        # Agents that died during this step will get their next obs, reward, done, info later when the round finishes
         for agent in self.active_agents:
-            rewards[agent.name] = 0# self.calculate_reward(agent)
-            agent.crates_destroyed = 0
+            rewards[agent.name] = 0
+            agent.crates_destroyed = 0# Reset aux score
             agent.store_game_state(self.get_state_for_agent(agent))
-            dones[agent.name] = False#agent.dead
+            dones[agent.name] = False
             obs[agent.name] = self.get_observation_from_game_state(agent.last_game_state, self.agents.keys(), self.current_step)
             infos[agent.name] = agent.score
 
         if self.done():
             self.end_round()
             dones['__all__'] = True
-            w, l = self.get_winner_loser()
+            # Determine winner and losers
+            # winner can only contain a single agent with the highest score
+            # loser contains agents without the highest score
+            winner, loser = self.get_winner_loser()
             for a in self.agents.values():
+                # Add observation for agents that died ealier
                 if a not in self.active_agents:
                     a.store_game_state(self.get_state_for_agent(a))
                     obs[a.name] = self.get_observation_from_game_state(a.last_game_state, self.agents.keys(), self.current_step)
-                if a.name in w:
+                # Add rewards for all agents based on their final score
+                if a.name in winner:
                     rewards[a.name] = 3.
-                elif a.name in l:
+                elif a.name in loser:
                     rewards[a.name] = -1.
                 else:
                     rewards[a.name] = 0.
                 dones[a.name] = True
                 infos[a.name] = a.score
-            '''
-            if self.phase == 2:
-                w, l = self.get_winner_loser()
-                for agent_name in action_dict.keys():
-                    #agent = self.agents[agent_name]
-                    #opp_score_max = max([v.score for k, v in self.agents.items() if k != agent_name])
-                    #rewards[agent_name] = rewards[agent.name]+(agent.score - opp_score_max) / 10.
-                    if agent_name in w:
-                        rewards[agent_name] = 3.
-                    elif agent_name in l:
-                        rewards[agent_name] = -1.
-            '''
         else:
             dones['__all__'] = False
 
@@ -217,6 +171,10 @@ class BombermanEnv(MultiAgentEnv):
             opp_score = sum([v.aux_score for k, v in self.agents.items() if k != a])
             agent.step_reward = agent.aux_score - (opp_score / max(1, len(agent_names)-1))
 
+    '''
+    Currently not used.
+    Rewards are received only at terminal timesteps.
+    '''
     def calculate_reward(self, agent: Agent):
         if not agent.dead:
             if self.phase == 0:
@@ -454,7 +412,6 @@ class BombermanEnv(MultiAgentEnv):
 
         return state
 
-    #TODO: fix. make static, remove dependency on self.agents
     @staticmethod
     def get_observation_from_game_state(game_state, agent_ids, current_round):
         field = game_state['field']

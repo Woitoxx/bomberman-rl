@@ -4,12 +4,7 @@ import random
 
 import ray
 from ray.rllib.agents.impala import ImpalaTrainer
-from ray.rllib.agents.ppo import PPOTrainer
 from ray.rllib.models import ModelCatalog
-from ray.tune import Callback
-from ray.tune.logger import pretty_print
-from stable_baselines3.ppo import *
-from ray.rllib.agents.pg import PGTrainer
 from training.bomberman_multi_env import BombermanEnv
 from ray import tune
 import numpy as np
