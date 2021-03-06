@@ -1,3 +1,5 @@
+import copy
+import random
 from typing import Dict
 import numpy as np
 from ray.rllib import RolloutWorker, BaseEnv, Policy, SampleBatch
@@ -6,6 +8,10 @@ from ray.rllib.evaluation import MultiAgentEpisode
 
 
 class MyCallbacks(DefaultCallbacks):
+    def __init__(self):
+        super().__init__()
+        self.policies = []
+
     def on_episode_start(self, worker: RolloutWorker, base_env: BaseEnv,
                          policies: Dict[str, Policy],
                          episode: MultiAgentEpisode, **kwargs):
@@ -45,12 +51,36 @@ class MyCallbacks(DefaultCallbacks):
         #print("returned sample batch of size {}".format(samples.count))
         pass
 
+    @staticmethod
+    def copy_weights(src_policy, dest_policy):
+        P0key_P1val = {}  # temp storage with "policy_0" keys & "policy_1" values
+        for (k, v), (k2, v2) in zip(dest_policy.get_weights().items(),
+                                    src_policy.items()):
+            P0key_P1val[k] = v2
+
+        # set weights
+        dest_policy.set_weights(P0key_P1val)
+
     def on_train_result(self, trainer, result: dict, **kwargs):
         print("trainer.train() result: {} -> {} episodes".format(
             trainer, result["episodes_this_iter"]))
         # you can mutate the result dict to add new fields to return
         #result["callback_ok"] = True
-        pass
+        current_policy = trainer.get_policy('policy_01').get_weights()
+        #current_policy = {}
+        #for k,v in trainer.get_policy('policy_01').get_weights().items():
+        #    current_policy[k] = v
+
+        self.policies.append(current_policy)
+        if len(self.policies) > 100:
+            self.policies.pop(0)
+        #self.copy_weights(current_policy if np.random.rand() > 0.2 else np.random.choice(self.policies), trainer.get_policy('policy_02'))
+        new_policy = current_policy if np.random.rand() > 0.2 else random.choice(self.policies)
+        trainer.workers.foreach_worker(lambda w: w.get_policy('policy_02').set_weights(new_policy))
+        #trainer.workers.foreach_worker(lambda w: self.copy_weights(current_policy if np.random.rand() > 0.2 else np.random.choice(self.policies), w.get_policy('policy_02')))
+        if result["iterations_since_restore"] % 10 == 0:
+            trainer.save()
+
 
     def on_postprocess_trajectory(
             self, worker: RolloutWorker, episode: MultiAgentEpisode,

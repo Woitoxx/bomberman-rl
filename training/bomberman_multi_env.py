@@ -162,22 +162,31 @@ class BombermanEnv(MultiAgentEnv):
         self.evaluate_explosions()
         #self.update_step_rewards(action_dict.keys())
 
-        for agent_name in action_dict.keys():
-            agent = self.agents[agent_name]
-            rewards[agent.name] = self.calculate_reward(agent)#agent.step_reward#
-            #agent.step_reward = 0
-            #agent.aux_score = 0
+        for agent in self.active_agents:
+            rewards[agent.name] = 0# self.calculate_reward(agent)
             agent.crates_destroyed = 0
             agent.store_game_state(self.get_state_for_agent(agent))
-            dones[agent_name] = self.agents[agent_name].dead
+            dones[agent.name] = False#agent.dead
             obs[agent.name] = self.get_observation_from_game_state(agent.last_game_state, self.agents.keys(), self.current_step)
             infos[agent.name] = agent.score
 
         if self.done():
             self.end_round()
             dones['__all__'] = True
-            #score_max = max([v.score for k, v in self.agents.items()])
-            #players_with_max_score = len([k for k, v in self.agents.items() if v.score == score_max])
+            w, l = self.get_winner_loser()
+            for a in self.agents.values():
+                if a not in self.active_agents:
+                    a.store_game_state(self.get_state_for_agent(a))
+                    obs[a.name] = self.get_observation_from_game_state(a.last_game_state, self.agents.keys(), self.current_step)
+                if a.name in w:
+                    rewards[a.name] = 3.
+                elif a.name in l:
+                    rewards[a.name] = -1.
+                else:
+                    rewards[a.name] = 0.
+                dones[a.name] = True
+                infos[a.name] = a.score
+            '''
             if self.phase == 2:
                 w, l = self.get_winner_loser()
                 for agent_name in action_dict.keys():
@@ -185,9 +194,10 @@ class BombermanEnv(MultiAgentEnv):
                     #opp_score_max = max([v.score for k, v in self.agents.items() if k != agent_name])
                     #rewards[agent_name] = rewards[agent.name]+(agent.score - opp_score_max) / 10.
                     if agent_name in w:
-                        rewards[agent_name] += 3.
+                        rewards[agent_name] = 3.
                     elif agent_name in l:
-                        rewards[agent_name] -= 1.
+                        rewards[agent_name] = -1.
+            '''
         else:
             dones['__all__'] = False
 
@@ -210,7 +220,7 @@ class BombermanEnv(MultiAgentEnv):
     def calculate_reward(self, agent: Agent):
         if not agent.dead:
             if self.phase == 0:
-                reward = (agent.score - agent.last_game_state['self'][1]) * 0.8
+                reward = (agent.score - agent.last_game_state['self'][1]) * 0.9
                 reward += agent.crates_destroyed * 0.1
                 return reward
             if self.phase == 1:
@@ -218,14 +228,14 @@ class BombermanEnv(MultiAgentEnv):
                 return reward
             return 0.
         else:
-            if self.phase == 2:
-                if not agent.is_suicide_bomber:
-                    return -5.
+            #if self.phase == 2:
+            #    if not agent.is_suicide_bomber:
+            #        return -5.
             #    if not agent.is_suicide_bomber:
             #        opp_score_max = max([v.score for k, v in self.agents.items() if k != agent.name])
             #        reward = (agent.score - opp_score_max)/10.
             #        return reward
-            return 0.
+            return -1.
 
     def set_phase(self, phase):
         self.phase = phase
@@ -418,12 +428,11 @@ class BombermanEnv(MultiAgentEnv):
         players_with_max_score = len([k for k, v in self.agents.items() if v.score == score_max])
         winner = []
         loser = []
-        if self.phase == 1:
-            for k, v in self.agents.items():
-                if v.score == score_max and players_with_max_score == 1:
-                    winner.append(k)
-                elif v.score != score_max:
-                    loser.append(k)
+        for k, v in self.agents.items():
+            if v.score == score_max and players_with_max_score == 1:
+                winner.append(k)
+            elif v.score != score_max:
+                loser.append(k)
         return winner, loser
 
     def get_state_for_agent(self, agent: Agent):
