@@ -5,12 +5,12 @@ from ray.rllib.models import ModelCatalog
 from training.bomberman_multi_env import BombermanEnv
 from ray import tune
 from training.callbacks import MyCallbacks
-from training.tfnet import ComplexInputNetwork
+from training.tfnet_2 import ComplexInputNetwork
 
 
 if __name__ == '__main__':
     ray.init(
-        _redis_max_memory=1024 * 1024 * 100,num_gpus=1, num_cpus=5, object_store_memory=10*2**30)
+        _redis_max_memory=1024 * 1024 * 100,num_gpus=1, object_store_memory=10*2**30)
     env = BombermanEnv([f'agent_{i}' for i in range(4)])
 
     ModelCatalog.register_custom_model("custom_model", ComplexInputNetwork)
@@ -19,7 +19,7 @@ if __name__ == '__main__':
 
     def policy_mapping_fn(agent_id):
         #if phase == 0:
-        #    return "policy_01"
+        #return "policy_01"
         #else:
         if agent_id.startswith("agent_0"):# or np.random.rand() > 0.2:
             return "policy_01"  # Choose 01 policy for agent_01
@@ -28,7 +28,7 @@ if __name__ == '__main__':
 
     def train(config, checkpoint_dir=None):
         trainer = PPOTrainer(config=config, env='BomberMan-v0')
-        #trainer.restore('C:\\Users\\Florian\\ray_results\\PPO_BomberMan-v0_2021-03-05_17-39-02u72perfg\\checkpoint_000180\\checkpoint-180')
+        trainer.restore('C:\\Users\\Florian\\ray_results\\PPO_BomberMan-v0_2021-03-10_14-16-50n_4knahb\\checkpoint_002700\\checkpoint-2700')
         iter = 0
 
         def update_phase(ev):
@@ -37,14 +37,10 @@ if __name__ == '__main__':
         phase = 2
         trainer.workers.foreach_worker(update_phase)
 
-        if not os.path.exists(f'./model-{iter}'):
-            trainer.get_policy('policy_01').export_model(f'./model-{iter}')
-        else:
-            print("Model already saved.")
         while True:
             iter += 1
             result = trainer.train()
-            if iter % 500 == 0:
+            if iter % 250 == 0:
                 if not os.path.exists(f'./model-{iter}'):
                     trainer.get_policy('policy_01').export_model(f'./model-{iter}')
                 else:
@@ -76,14 +72,15 @@ if __name__ == '__main__':
             'lambda': 0.95,
             'gamma': 0.99,
             'kl_coeff': 0.2,
+            'vf_loss_coeff' : 0.5,
             'clip_rewards': False,
-            'entropy_coeff': 0.01,
-            'train_batch_size': 32768,
+            'entropy_coeff': 0.003,
+            'train_batch_size': 32768,#49152,
             'sgd_minibatch_size': 64,
             'shuffle_sequences': True,
-            'num_sgd_iter': 5,
-            'num_cpus_per_worker': 2,
+            'num_sgd_iter': 10,
             'num_workers': 2,
+            'num_cpus_per_worker': 3,
             'ignore_worker_failures': True,
             'num_envs_per_worker': 8,
             #"model": {
@@ -91,19 +88,21 @@ if __name__ == '__main__':
             #},
             "model": {
                 "custom_model": "custom_model",
-                "dim": 15, "conv_filters": [[32, [5, 5], 2],  [64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1],  [64, [3, 3], 1],  [64, [3, 3], 1], [6, [1, 1], 1]],
+                "dim": 15,
+                #"conv_filters": [[16, [5, 5], 1], [32, [3, 3], 2], [32, [3, 3], 1], [64, [3, 3], 2], [64, [3, 3], 1], [128, [3, 3], 2], [128, [3, 3], 1], [2, [1, 1], 1]],
+                "conv_filters" : [[32, [5,5], 2], [32, [3,3], 2], [64, [3,3], 2], [128, [3,3], 2], [256, [1,1], 1]],
                 "conv_activation" : "relu",
-                "post_fcnet_hiddens": [256,256],
+                "post_fcnet_hiddens": [256],
                 "post_fcnet_activation": "relu",
                  #"fcnet_hiddens": [256,256],
-                 #"vf_share_layers": 'true'
+                 "vf_share_layers": 'true'
                  },
             'rollout_fragment_length': 2048,
             'batch_mode': 'truncate_episodes',
             'observation_filter': 'NoFilter',
             'num_gpus': 1,
-            'lr': 1e-2,
-            "lr_schedule": [[0, 0.001], [2e6, 0.001], [2e6+1, 0.0005], [1e7, 0.0005], [1e7+1, 0.0003]],
+            'lr': 3e-4,
+            #"lr_schedule": [[0, 0.0005], [5e6, 0.0005], [5e6+1, 0.0003]],#, [2e7, 0.0003], [2e7+1, 0.0001]],
             'log_level': 'INFO',
             'framework': 'tf',
             #'simple_optimizer': args.simple,

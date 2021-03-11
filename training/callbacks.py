@@ -11,6 +11,8 @@ class MyCallbacks(DefaultCallbacks):
     def __init__(self):
         super().__init__()
         self.policies = []
+        self.player_scores = []
+        self.opponent_scores = []
 
     def on_episode_start(self, worker: RolloutWorker, base_env: BaseEnv,
                          policies: Dict[str, Policy],
@@ -24,10 +26,18 @@ class MyCallbacks(DefaultCallbacks):
     def on_episode_end(self, worker: RolloutWorker, base_env: BaseEnv,
                        policies: Dict[str, Policy], episode: MultiAgentEpisode,
                        **kwargs):
-        pass
+        self.player_scores.append(episode.last_info_for(f'agent_0'))
+        for i in range(1,4):
+            self.opponent_scores.append(episode.last_info_for(f'agent_{i}'))
 
     def on_sample_end(self, worker: RolloutWorker, samples: SampleBatch,
                       **kwargs):
+        print(f'Player max score: {np.max(self.player_scores)}')
+        print(f'Player avg score: {np.average(self.player_scores)}')
+        print(f'Opp max score: {np.max(self.opponent_scores)}')
+        print(f'Opp avg score: {np.average(self.opponent_scores)}')
+        self.player_scores.clear()
+        self.opponent_scores.clear()
         pass
 
     @staticmethod
@@ -46,11 +56,13 @@ class MyCallbacks(DefaultCallbacks):
             trainer, result["episodes_this_iter"]))
 
         # Add current policy to the menagerie
+
         current_policy = trainer.get_policy('policy_01').get_weights()
-        self.policies.append(current_policy)
+        if result["policy_reward_mean"]["policy_01"] > 0 or len(self.policies) == 0:
+            self.policies.append(current_policy)
         # Maintain only the latest 100 previous policies
-        if len(self.policies) > 100:
-            self.policies.pop(0)
+            if len(self.policies) > 100:
+                self.policies.pop(0)
         #self.copy_weights(current_policy if np.random.rand() > 0.2 else np.random.choice(self.policies), trainer.get_policy('policy_02'))
 
         # Choose either current policy (80%) or random previous policy (20%) for our opponents
@@ -61,6 +73,7 @@ class MyCallbacks(DefaultCallbacks):
 
         # Checkpoint
         if result["iterations_since_restore"] % 10 == 0:
+            print(f'Checkpoint saved at iter {result["iterations_since_restore"]}')
             trainer.save()
 
 

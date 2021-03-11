@@ -124,8 +124,9 @@ class BombermanEnv(MultiAgentEnv):
         # Set obs, reward, done, info for agents still alive
         # Agents that died during this step will get their next obs, reward, done, info later when the round finishes
         for agent in self.active_agents:
-            rewards[agent.name] = 0
-            agent.crates_destroyed = 0# Reset aux score
+            rewards[agent.name] = agent.aux_score
+            agent.aux_score = 0
+            #agent.crates_destroyed = 0# Reset aux score
             agent.store_game_state(self.get_state_for_agent(agent))
             dones[agent.name] = False
             obs[agent.name] = self.get_observation_from_game_state(agent.last_game_state, self.agents.keys(), self.current_step)
@@ -139,17 +140,20 @@ class BombermanEnv(MultiAgentEnv):
             # loser contains agents without the highest score
             winner, loser = self.get_winner_loser()
             for a in self.agents.values():
+                rewards[a.name] = 0
                 # Add observation for agents that died ealier
                 if a not in self.active_agents:
+                    rewards[a.name] += a.aux_score
                     a.store_game_state(self.get_state_for_agent(a))
                     obs[a.name] = self.get_observation_from_game_state(a.last_game_state, self.agents.keys(), self.current_step)
                 # Add rewards for all agents based on their final score
-                if a.name in winner:
-                    rewards[a.name] = 3.
-                elif a.name in loser:
-                    rewards[a.name] = -1.
-                else:
-                    rewards[a.name] = 0.
+                #if a.name in winner:
+                    #rewards[a.name] = 3. / 3**(len(winner)-1)
+                rewards[a.name] -= np.average([v.score for k, v in self.agents.items() if k != a.name])
+                #elif a.name in loser:
+                #    rewards[a.name] = -1.
+                #else:
+                #    rewards[a.name] = 0.
                 dones[a.name] = True
                 infos[a.name] = a.score
         else:
@@ -161,6 +165,7 @@ class BombermanEnv(MultiAgentEnv):
         obs = {}
         self.new_round()
         for agent in self.active_agents:
+            agent.aux_score = 0
             agent.store_game_state(self.get_state_for_agent(agent))
             obs[agent.name] = self.get_observation_from_game_state(agent.last_game_state, self.agents.keys(), self.current_step)
         return obs
@@ -294,7 +299,7 @@ class BombermanEnv(MultiAgentEnv):
                     if a.x == coin.x and a.y == coin.y:
                         coin.collectable = False
                         a.update_score(s.REWARD_COIN)
-                        #a.aux_score += 1
+                        a.aux_score += 1
 
     def update_bombs(self):
         """
@@ -342,7 +347,7 @@ class BombermanEnv(MultiAgentEnv):
                         # Note who killed whom, adjust scores
                         if a is not explosion.owner:
                             explosion.owner.update_score(s.REWARD_KILL)
-                            #explosion.owner.aux_score+=5
+                            explosion.owner.aux_score+=5
                         else:
                             a.is_suicide_bomber = True
             # Show smoke for a little longer
@@ -387,7 +392,7 @@ class BombermanEnv(MultiAgentEnv):
         winner = []
         loser = []
         for k, v in self.agents.items():
-            if v.score == score_max and players_with_max_score == 1:
+            if v.score == score_max and players_with_max_score < 4:
                 winner.append(k)
             elif v.score != score_max:
                 loser.append(k)

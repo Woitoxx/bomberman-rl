@@ -58,7 +58,7 @@ class ComplexInputNetwork(TFModelV2):
                     "conv_activation": model_config.get("conv_activation"),
                     "post_fcnet_hiddens": [],
                 }
-                cnn = CustomVisionNetwork(component,action_space,None,config,"cnn_{}".format(i))
+                cnn = CustomVisionNetworkTF(component,action_space,None,config,"cnn_{}".format(i))
                 '''
                 cnn = ModelCatalog.get_model_v2(
                     component,
@@ -84,7 +84,8 @@ class ComplexInputNetwork(TFModelV2):
         post_fc_stack_config = {
             "fcnet_hiddens": model_config.get("post_fcnet_hiddens", []),
             "fcnet_activation": model_config.get("post_fcnet_activation",
-                                                 "relu")
+                                                 "relu"),
+            "vf_share_layers": 'false'
         }
         self.post_fc_stack = ModelCatalog.get_model_v2(
             Box(float("-inf"),
@@ -107,14 +108,14 @@ class ComplexInputNetwork(TFModelV2):
                 (self.post_fc_stack.num_outputs, ))
             logits_layer = tf.keras.layers.Dense(
                 num_outputs,
-                activation=tf.keras.activations.linear,
+                activation=tf.keras.activations.softmax,
                 name="logits")(concat_layer)
 
             # Create the value branch model.
             value_layer = tf.keras.layers.Dense(
                 1,
                 name="value_out",
-                activation='tanh',
+                activation=tf.keras.activations.tanh,
                 kernel_initializer=normc_initializer(0.01))(concat_layer)
             self.logits_and_value_model = tf.keras.models.Model(
                 concat_layer, [logits_layer, value_layer])
@@ -131,7 +132,7 @@ class ComplexInputNetwork(TFModelV2):
         outs = []
         for i, component in enumerate(orig_obs):
             if i in self.cnns:
-                cnn_out, _ = self.cnns[i]({SampleBatch.OBS: component})
+                cnn_out, _ = self.cnns[i]({SampleBatch.OBS: component, 'is_training':input_dict['is_training']})
                 outs.append(cnn_out)
             elif i in self.one_hot:
                 if component.dtype in [tf.int32, tf.int64, tf.uint8]:
@@ -208,6 +209,8 @@ class CustomVisionNetwork(TFModelV2):
             self.data_format = "channels_last"
 
         inputs = tf.keras.layers.Input(shape=input_shape, name="observations")
+        #is_training = tf.keras.layers.Input(
+        #    shape=(), dtype=tf.bool, batch_size=1, name="is_training")
         last_layer = inputs
         # Whether the last layer is the output of a Flattened (rather than
         # a n x (1,1) Conv2D).
@@ -215,14 +218,37 @@ class CustomVisionNetwork(TFModelV2):
 
         # Build the action layers
         for i, (out_size, kernel, stride) in enumerate(filters[:-1], 1):
-            last_layer = tf.keras.layers.Conv2D(
-                out_size,
-                kernel,
-                strides=(stride, stride),
-                activation=activation,
-                padding="same",
-                data_format="channels_last",
-                name="conv{}".format(i))(last_layer)
+            if i == 1:
+                last_layer = tf.keras.layers.Conv2D(
+                    out_size,
+                    kernel,
+                    strides=(stride, stride),
+                    padding="same",
+                    data_format="channels_last",
+                    name="conv{}".format(i))(last_layer)
+                #last_layer = tf.keras.layers.BatchNormalization()(last_layer, training=is_training[0])
+                last_layer = tf.keras.layers.ReLU()(last_layer)
+            else:
+                input_layer = last_layer
+                last_layer = tf.keras.layers.Conv2D(
+                    out_size,
+                    kernel,
+                    strides=(stride, stride),
+                    padding="same",
+                    data_format="channels_last",
+                    name="conv{}".format(i*2 - 2))(last_layer)
+                #last_layer = tf.keras.layers.BatchNormalization()(last_layer, training=is_training[0])
+                last_layer = tf.keras.layers.ReLU()(last_layer)
+                last_layer = tf.keras.layers.Conv2D(
+                    out_size,
+                    kernel,
+                    strides=(stride, stride),
+                    padding="same",
+                    data_format="channels_last",
+                    name="conv{}".format(i * 2 - 1))(last_layer)
+                #last_layer = tf.keras.layers.BatchNormalization()(last_layer, training=is_training[0])
+                last_layer = tf.keras.layers.Add()([input_layer, last_layer])
+                last_layer = tf.keras.layers.ReLU()(last_layer)
 
         out_size, kernel, stride = filters[-1]
 
@@ -230,13 +256,16 @@ class CustomVisionNetwork(TFModelV2):
             out_size,
             kernel,
             strides=(stride, stride),
-            activation=activation,
             padding="valid",
             data_format="channels_last",
-            name="conv{}".format(len(filters)))(last_layer)
-        self.last_layer_is_flattened = True
+            name="conv{}".format(2*len(filters)))(last_layer)
+        #last_layer = tf.keras.layers.BatchNormalization()(last_layer, training=is_training[0])
+        last_layer = tf.keras.layers.ReLU()(last_layer)
         last_layer = tf.keras.layers.Flatten(
             data_format="channels_last")(last_layer)
+        self.last_layer_is_flattened = True
+
+        '''
         # Add (optional) post-fc-stack after last Conv2D layer.
         for i, out_size in enumerate(post_fcnet_hiddens):
             last_layer = tf.keras.layers.Dense(
@@ -244,6 +273,7 @@ class CustomVisionNetwork(TFModelV2):
                 name="post_fcnet_{}".format(i),
                 activation=post_fcnet_activation,
                 kernel_initializer=normc_initializer(1.0))(last_layer)
+        '''
         self.num_outputs = last_layer.shape[1]
         logits_out = last_layer
 
@@ -291,19 +321,6 @@ class CustomVisionNetwork(TFModelV2):
         '''
         self.base_model = tf.keras.Model(inputs, [logits_out])
         self.base_model.summary()
-        # Optional: framestacking obs/new_obs for Atari.
-        if self.traj_view_framestacking:
-            from_ = model_config["num_framestacks"] - 1
-            self.view_requirements[SampleBatch.OBS].shift = \
-                "-{}:0".format(from_)
-            self.view_requirements[SampleBatch.OBS].shift_from = -from_
-            self.view_requirements[SampleBatch.OBS].shift_to = 0
-            self.view_requirements[SampleBatch.NEXT_OBS] = ViewRequirement(
-                data_col=SampleBatch.OBS,
-                shift="-{}:1".format(from_ - 1),
-                space=self.view_requirements[SampleBatch.OBS].space,
-                used_for_compute_actions=False,
-            )
 
     def forward(self, input_dict: Dict[str, TensorType],
                 state: List[TensorType],
@@ -321,4 +338,132 @@ class CustomVisionNetwork(TFModelV2):
             return tf.squeeze(model_out, axis=[1, 2]), state
 
     def value_function(self) -> TensorType:
+        return tf.reshape(self._value_out, [-1])
+
+
+class CustomVisionNetworkTF(TFModelV2):
+    def __init__(self, obs_space, action_space, num_outputs, model_config,
+                 name):
+        super().__init__(obs_space, action_space, num_outputs, model_config,
+                         name)
+        # Have we registered our vars yet (see `forward`)?
+        self._registered = False
+        self.num_outputs = 512#self.model_config["conv_filters"][-1][0]*15*15
+
+    @override(ModelV2)
+    def forward(self, input_dict, state, seq_lens):
+        last_layer = input_dict["obs"]
+
+        filters = self.model_config["conv_filters"]
+        assert len(filters) > 0, \
+            "Must provide at least 1 entry in `conv_filters`!"
+
+        self.data_format = "channels_last"
+
+        self.last_layer_is_flattened = False
+        scope = input_dict['obs'].name[:9]
+        with tf1.variable_scope('model', reuse=tf1.AUTO_REUSE):
+            # Build the action layers
+            for i, (out_size, kernel, stride) in enumerate(filters[:-1], 1):
+                if i == 1:
+                    last_layer = tf1.layers.Conv2D(
+                        filters=out_size,
+                        kernel_size=kernel,
+                        strides=(stride, stride),
+                        padding="same",
+                        data_format="channels_last",
+                        name="conv{}".format(i))(last_layer)
+                    last_layer = tf1.layers.batch_normalization(last_layer,training=input_dict["is_training"])
+                    last_layer = tf1.nn.relu(last_layer)
+
+                else:
+                    if i == 2:
+                        #last_layer = tf1.layers.MaxPooling2D(strides=(2, 2), pool_size=(3, 3), padding='same')(
+                        #   last_layer)
+                        pass
+                    input_layer = last_layer
+                    last_layer = tf1.layers.Conv2D(
+                        filters=out_size,
+                        kernel_size=kernel,
+                        strides=(stride, stride),
+                        padding="same",
+                        data_format="channels_last",
+                        name="conv{}".format(i * 2 - 2))(last_layer)
+                    last_layer = tf1.layers.batch_normalization(last_layer, training=input_dict["is_training"])
+                    last_layer = tf1.nn.relu(last_layer)
+                    last_layer = tf1.layers.Conv2D(
+                        filters=out_size,
+                        kernel_size=kernel,
+                        strides=(1, 1),
+                        padding="same",
+                        data_format="channels_last",
+                        name="conv{}".format(i * 2 - 1))(last_layer)
+                    last_layer = tf1.layers.batch_normalization(last_layer, training=input_dict["is_training"])
+                    shortcut = tf1.layers.Conv2D(
+                        filters=out_size,
+                        kernel_size=(1, 1),
+                        strides=(stride, stride),
+                        padding="same",
+                        data_format="channels_last",
+                        name='skip{}'.format(i))(input_layer)
+                    last_layer = tf1.math.add(shortcut, last_layer)
+                    last_layer = tf1.nn.relu(last_layer)
+            '''
+            out_size, kernel, stride = filters[-1]
+
+            last_layer = tf1.layers.Conv2D(
+                filters=out_size,
+                kernel_size=kernel,
+                strides=(stride, stride),
+                padding="valid",
+                data_format="channels_last",
+                name="conv{}".format(2 * len(filters)))(last_layer)
+            last_layer = tf1.layers.batch_normalization(last_layer, training=input_dict["is_training"])
+            last_layer = tf1.nn.relu(last_layer)
+            '''
+            #last_layer = tf1.layers.AveragePooling2D((2,2),(2,2))(last_layer)
+            last_layer = tf1.layers.Flatten(data_format="channels_last")(last_layer)
+            self.last_layer_is_flattened = True
+
+            '''
+            # Add (optional) post-fc-stack after last Conv2D layer.
+            for i, out_size in enumerate(post_fcnet_hiddens):
+                last_layer = tf.keras.layers.Dense(
+                    out_size,
+                    name="post_fcnet_{}".format(i),
+                    activation=post_fcnet_activation,
+                    kernel_initializer=normc_initializer(1.0))(last_layer)
+            '''
+            self.num_outputs = last_layer.shape[1]
+            logits_out = last_layer
+
+
+
+
+        # Register variables.
+        # NOTE: This is not the recommended way of doing things. We would
+        # prefer creating keras-style Layers like it's done in the
+        # `KerasBatchNormModel` class above and then have TFModelV2 auto-detect
+        # the created vars. However, since there is a bug
+        # in keras/tf that prevents us from using that KerasBatchNormModel
+        # example (see comments above), we do variable registration the old,
+        # manual way for this example Model here.
+        if not self._registered:
+            # Register already auto-detected variables (from the wrapping
+            # Model, e.g. DQNTFModel).
+            var = self.variables()
+            self.register_variables(var)
+            # Then register everything we added to the graph in this `forward`
+            # call.
+            tvar = tf1.get_collection(
+                    tf1.GraphKeys.TRAINABLE_VARIABLES, scope=f".+/model/.+")
+            if input_dict['obs'].name[:9] == 'policy_02':
+                tvar = [t for t in tvar if t.name[:9]!='policy_01']
+            self.register_variables(tvar)
+            self._registered = True
+
+        return logits_out, []
+
+    @override(ModelV2)
+    def value_function(self):
         return tf.reshape(self._value_out, [-1])
