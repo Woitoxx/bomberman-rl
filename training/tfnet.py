@@ -85,41 +85,59 @@ class ComplexInputNetwork(TFModelV2):
             "fcnet_hiddens": model_config.get("post_fcnet_hiddens", []),
             "fcnet_activation": model_config.get("post_fcnet_activation",
                                                  "relu"),
-            "vf_share_layers": 'false'
+            "vf_share_layers" : 'False'
         }
         self.post_fc_stack = ModelCatalog.get_model_v2(
             Box(float("-inf"),
                 float("inf"),
-                shape=(concat_size, ),
+                shape=(concat_size,),
                 dtype=np.float32),
             self.action_space,
             None,
             post_fc_stack_config,
             framework="tf",
             name="post_fc_stack")
+
+        self.post_fc_stack_vf = ModelCatalog.get_model_v2(
+            Box(float("-inf"),
+                float("inf"),
+                shape=(concat_size,),
+                dtype=np.float32),
+            self.action_space,
+            None,
+            post_fc_stack_config,
+            framework="tf",
+            name="post_fc_stack_vf")
         self.post_fc_stack.base_model.summary()
+        self.post_fc_stack_vf.base_model.summary()
 
         # Actions and value heads.
         self.logits_and_value_model = None
         self._value_out = None
         if num_outputs:
             # Action-distribution head.
-            concat_layer = tf.keras.layers.Input(
-                (self.post_fc_stack.num_outputs, ))
+            p_layer = tf.keras.layers.Input(
+                (self.post_fc_stack.num_outputs,))
+            v_layer = tf.keras.layers.Input(
+                (self.post_fc_stack.num_outputs,))
             logits_layer = tf.keras.layers.Dense(
                 num_outputs,
-                activation=tf.keras.activations.softmax,
-                name="logits")(concat_layer)
+                activation=tf.keras.activations.linear,
+                name="logits")(p_layer)
 
             # Create the value branch model.
             value_layer = tf.keras.layers.Dense(
                 1,
                 name="value_out",
                 activation=tf.keras.activations.tanh,
-                kernel_initializer=normc_initializer(0.01))(concat_layer)
-            self.logits_and_value_model = tf.keras.models.Model(
-                concat_layer, [logits_layer, value_layer])
-            self.logits_and_value_model.summary()
+                kernel_initializer=normc_initializer(0.01))(v_layer)
+            self.logits_model = tf.keras.models.Model(
+                p_layer, [logits_layer])
+            self.value_model = tf.keras.models.Model(
+                v_layer, [value_layer]
+            )
+            self.logits_model.summary()
+            self.value_model.summary()
         else:
             self.num_outputs = self.post_fc_stack.num_outputs
 
@@ -145,14 +163,15 @@ class ComplexInputNetwork(TFModelV2):
         # Concat all outputs and the non-image inputs.
         out = tf.concat(outs, axis=1)
         # Push through (optional) FC-stack (this may be an empty stack).
-        out, _ = self.post_fc_stack({SampleBatch.OBS: out}, [], None)
+        out_p, _ = self.post_fc_stack({SampleBatch.OBS: out}, [], None)
+        out_vf, _ = self.post_fc_stack_vf({SampleBatch.OBS: out}, [], None)
 
         # No logits/value branches.
-        if not self.logits_and_value_model:
-            return out, []
+        # if not self.logits_and_value_model:
+        #    return out, []
 
         # Logits- and value branches.
-        logits, values = self.logits_and_value_model(out)
+        logits, values = self.logits_model(out_p), self.value_model(out_vf)
         self._value_out = tf.reshape(values, [-1])
         return logits, []
 
