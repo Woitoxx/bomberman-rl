@@ -28,7 +28,7 @@ if __name__ == '__main__':
 
     def train(config, checkpoint_dir=None):
         trainer = PPOTrainer(config=config, env='BomberMan-v0')
-        trainer.restore('C:\\Users\\Florian\\ray_results\\PPO_BomberMan-v0_2021-03-10_14-16-50n_4knahb\\checkpoint_002700\\checkpoint-2700')
+        #trainer.restore('C:\\Users\\Florian\\ray_results\\PPO_BomberMan-v0_2021-03-10_14-16-50n_4knahb\\checkpoint_002700\\checkpoint-2700')
         iter = 0
 
         def update_phase(ev):
@@ -43,7 +43,6 @@ if __name__ == '__main__':
             if iter % 250 == 0:
                 if not os.path.exists(f'./model-{iter}'):
                     trainer.get_policy('policy_01').export_model(f'./model-{iter}')
-                    trainer.get_policy('policy_01')
                 else:
                     print("model already saved")
             '''
