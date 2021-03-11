@@ -129,7 +129,7 @@ class BombermanEnv(MultiAgentEnv):
             #agent.crates_destroyed = 0# Reset aux score
             agent.store_game_state(self.get_state_for_agent(agent))
             dones[agent.name] = False
-            obs[agent.name] = self.get_observation_from_game_state(agent.last_game_state, self.agents.keys(), self.current_step)
+            obs[agent.name] = get_observation_from_game_state(agent.last_game_state, self.agents.keys(), self.current_step)
             infos[agent.name] = agent.score
 
         if self.done():
@@ -145,7 +145,7 @@ class BombermanEnv(MultiAgentEnv):
                 if a not in self.active_agents:
                     rewards[a.name] += a.aux_score
                     a.store_game_state(self.get_state_for_agent(a))
-                    obs[a.name] = self.get_observation_from_game_state(a.last_game_state, self.agents.keys(), self.current_step)
+                    obs[a.name] = get_observation_from_game_state(a.last_game_state, self.agents.keys(), self.current_step)
                 # Add rewards for all agents based on their final score
                 #if a.name in winner:
                     #rewards[a.name] = 3. / 3**(len(winner)-1)
@@ -167,7 +167,7 @@ class BombermanEnv(MultiAgentEnv):
         for agent in self.active_agents:
             agent.aux_score = 0
             agent.store_game_state(self.get_state_for_agent(agent))
-            obs[agent.name] = self.get_observation_from_game_state(agent.last_game_state, self.agents.keys(), self.current_step)
+            obs[agent.name] = get_observation_from_game_state(agent.last_game_state, self.agents.keys(), self.current_step)
         return obs
 
     def update_step_rewards(self, agent_names):
@@ -417,8 +417,8 @@ class BombermanEnv(MultiAgentEnv):
 
         return state
 
-    @staticmethod
-    def get_observation_from_game_state(game_state, agent_ids, current_round):
+
+def get_observation_from_game_state(game_state, agent_ids, current_round):
         field = game_state['field']
         walls = np.where(field == -1, 1, 0)[1:-1, 1:-1]
         free = np.where(field == 0, 1, 0)[1:-1, 1:-1]

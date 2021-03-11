@@ -43,6 +43,7 @@ if __name__ == '__main__':
             if iter % 250 == 0:
                 if not os.path.exists(f'./model-{iter}'):
                     trainer.get_policy('policy_01').export_model(f'./model-{iter}')
+                    trainer.get_policy('policy_01')
                 else:
                     print("model already saved")
             '''
