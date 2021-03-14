@@ -5,7 +5,7 @@ from ray.rllib.models import ModelCatalog
 from training.bomberman_multi_env import BombermanEnv
 from ray import tune
 from training.callbacks import MyCallbacks
-from training.tfnet_2 import ComplexInputNetwork
+from training.tfnet import ComplexInputNetwork
 
 
 if __name__ == '__main__':
@@ -78,7 +78,7 @@ if __name__ == '__main__':
             'train_batch_size': 32768,#49152,
             'sgd_minibatch_size': 64,
             'shuffle_sequences': True,
-            'num_sgd_iter': 10,
+            'num_sgd_iter': 8,
             'num_workers': 2,
             'num_cpus_per_worker': 3,
             'ignore_worker_failures': True,
@@ -89,8 +89,8 @@ if __name__ == '__main__':
             "model": {
                 "custom_model": "custom_model",
                 "dim": 15,
-                #"conv_filters": [[16, [5, 5], 1], [32, [3, 3], 2], [32, [3, 3], 1], [64, [3, 3], 2], [64, [3, 3], 1], [128, [3, 3], 2], [128, [3, 3], 1], [2, [1, 1], 1]],
-                "conv_filters" : [[32, [5,5], 2], [32, [3,3], 2], [64, [3,3], 2], [128, [3,3], 2], [256, [1,1], 1]],
+                "conv_filters": [[64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [2, [1, 1], 1]],
+                #8k run "conv_filters" : [[32, [5,5], 2], [32, [3,3], 2], [64, [3,3], 2], [128, [3,3], 2], [256, [1,1], 1]],
                 "conv_activation" : "relu",
                 "post_fcnet_hiddens": [256],
                 "post_fcnet_activation": "relu",
