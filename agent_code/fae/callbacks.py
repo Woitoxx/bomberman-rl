@@ -33,5 +33,5 @@ def act(self, game_state: dict):
     #a = tf.argmax(a,1)
     a = np.array(a)[0]
     game_state['user_input'] = self.available_actions[a]
-    print(game_state['user_input'])
+    #print(game_state['user_input'])
     return game_state['user_input']

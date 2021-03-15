@@ -421,7 +421,7 @@ class BombermanEnv(MultiAgentEnv):
     def get_state_for_agent(self, agent: Agent):
         state = {
             'round': self.round,
-            'current_step': self.current_step,
+            'step': self.current_step,
             'field': np.array(self.arena),
             'self': agent.get_state(),
             'others': [other.get_state() for other in self.active_agents if other is not agent],
@@ -483,4 +483,4 @@ def get_observation_from_game_state(game_state, agent_ids):
         out = np.stack((walls, free, crates, coins, bombs / 4., player, opponents, explosions / 2., all_ones), axis=2)
         # out = {'walls': walls, 'free': free, 'crates': crates, 'coins': coins, 'bombs': bombs, 'player': player,
         #        'opponents': opponents, 'explosions': explosions, 'scores': scores / 100., 'current_round': np.array([current_round / 400.])}
-        return out, np.array([score for score in scores.values()]) / 24., np.array([alive for alive in alives.values()]), np.array([game_state['current_step'] / 400.])
+        return out, np.array([score for score in scores.values()]) / 24., np.array([alive for alive in alives.values()]), np.array([game_state['step'] / 400.])
