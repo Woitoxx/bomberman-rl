@@ -441,12 +441,12 @@ class BombermanEnv(MultiAgentEnv):
 
 def get_available_actions_for_agent(agent, obs_arena):
     def tile_is_free(x, y):
-        is_free = (obs_arena[1][x, y] == 0)
+        is_free = 0 <= x <= 14 and 0 <= y <= 14 and obs_arena[1][x, y] == 1
         if is_free:
             is_free = is_free and obs_arena[4][x, y] == 0
         return is_free
 
-    x, y = agent[3]
+    x, y = agent[3][0]-1, agent[3][1]-1
     action_mask = np.zeros(6, dtype=int)
     action_mask[0] = tile_is_free(x, y - 1)
     action_mask[1] = tile_is_free(x, y + 1)
@@ -506,4 +506,4 @@ def get_observation_from_game_state(game_state, agent_ids):
            np.array([score for score in scores.values()]) / 24.,\
            np.array([alive for alive in alives.values()]),\
            np.array([game_state['current_step'] / 400.0]),\
-           get_available_actions_for_agent(game_state['self'], out)
+           get_available_actions_for_agent(game_state['self'], np.moveaxis(out, 2, 0))

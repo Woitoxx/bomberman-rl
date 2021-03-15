@@ -5,7 +5,7 @@ from ray.rllib.models import ModelCatalog
 from training.train_with_action_masking.bomberman_multi_env import BombermanEnv
 from ray import tune
 from training.callbacks import MyCallbacks
-from training.tfnet_2 import ComplexInputNetwork
+from training.train_with_action_masking.tfnet_with_masking import ComplexInputNetwork
 
 
 if __name__ == '__main__':
@@ -51,7 +51,7 @@ if __name__ == '__main__':
             'vf_loss_coeff' : 0.5,
             'clip_rewards': False,
             'entropy_coeff': 0.003,
-            'train_batch_size': 32768,#49152,
+            'train_batch_size': 2048,#32768,#49152,
             'sgd_minibatch_size': 64,
             'shuffle_sequences': True,
             'num_sgd_iter': 8,
