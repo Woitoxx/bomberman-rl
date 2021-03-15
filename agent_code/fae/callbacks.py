@@ -22,7 +22,7 @@ def act(self, game_state: dict):
     current_step = game_state['step'] -1
     if current_step == 0:
         self.agents = [game_state['self'][0]]+[o[0] for o in game_state['others']]
-    orig_obs = get_observation_from_game_state(game_state, self.agents, current_step)
+    orig_obs = get_observation_from_game_state(game_state, self.agents)
     board = np.moveaxis(orig_obs[0],2,0)
     obs = tf.cast(np.concatenate([orig_obs[0].flatten(),orig_obs[1],orig_obs[2],orig_obs[3]]).reshape(1,-1),dtype=tf.float32)
 

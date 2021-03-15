@@ -18,6 +18,7 @@ import numpy as np
 
 tf1, tf, tfv = try_import_tf()
 
+
 class ComplexInputNetwork(TFModelV2):
     """TFModelV2 concat'ing CNN outputs to flat input(s), followed by FC(s).
 
@@ -48,7 +49,7 @@ class ComplexInputNetwork(TFModelV2):
         self.cnns = {}
         self.one_hot = {}
         self.flatten = {}
-        concat_size = 0
+        concat_size_p, concat_size_v = 0, 0
         for i, component in enumerate(self.original_space):
             # Image space.
             if len(component.shape) == 3:
@@ -58,7 +59,7 @@ class ComplexInputNetwork(TFModelV2):
                     "conv_activation": model_config.get("conv_activation"),
                     "post_fcnet_hiddens": [],
                 }
-                cnn = CustomVisionNetworkTF(component,action_space,None,config,"cnn_{}".format(i))
+                cnn = CustomVisionNetwork(component,action_space,None,config,"cnn_{}".format(i))
                 '''
                 cnn = ModelCatalog.get_model_v2(
                     component,
@@ -68,58 +69,80 @@ class ComplexInputNetwork(TFModelV2):
                     framework="tf",
                     name="cnn_{}".format(i))
                 '''
-                concat_size += cnn.num_outputs
+                cnn.base_model.summary()
+                concat_size_p += cnn.num_outputs_p
+                concat_size_v += cnn.num_outputs_v
                 self.cnns[i] = cnn
             # Discrete inputs -> One-hot encode.
             elif isinstance(component, Discrete):
                 self.one_hot[i] = True
-                concat_size += component.n
+                concat_size_p += component.n
+                concat_size_v += component.n
             # TODO: (sven) Multidiscrete (see e.g. our auto-LSTM wrappers).
             # Everything else (1D Box).
             else:
                 self.flatten[i] = int(np.product(component.shape))
-                concat_size += self.flatten[i]
+                concat_size_p += self.flatten[i]
+                concat_size_v += self.flatten[i]
 
         # Optional post-concat FC-stack.
         post_fc_stack_config = {
             "fcnet_hiddens": model_config.get("post_fcnet_hiddens", []),
             "fcnet_activation": model_config.get("post_fcnet_activation",
                                                  "relu"),
-            "vf_share_layers": 'false'
+            "vf_share_layers" : 'True'
         }
         self.post_fc_stack = ModelCatalog.get_model_v2(
             Box(float("-inf"),
                 float("inf"),
-                shape=(concat_size, ),
+                shape=(concat_size_p,),
                 dtype=np.float32),
             self.action_space,
             None,
             post_fc_stack_config,
             framework="tf",
             name="post_fc_stack")
+
+        self.post_fc_stack_vf = ModelCatalog.get_model_v2(
+            Box(float("-inf"),
+                float("inf"),
+                shape=(concat_size_v,),
+                dtype=np.float32),
+            self.action_space,
+            None,
+            post_fc_stack_config,
+            framework="tf",
+            name="post_fc_stack_vf")
         self.post_fc_stack.base_model.summary()
+        self.post_fc_stack_vf.base_model.summary()
 
         # Actions and value heads.
         self.logits_and_value_model = None
         self._value_out = None
         if num_outputs:
             # Action-distribution head.
-            concat_layer = tf.keras.layers.Input(
-                (self.post_fc_stack.num_outputs, ))
+            p_layer = tf.keras.layers.Input(
+                (self.post_fc_stack.num_outputs,))
+            v_layer = tf.keras.layers.Input(
+                (self.post_fc_stack_vf.num_outputs,))
             logits_layer = tf.keras.layers.Dense(
                 num_outputs,
-                activation=tf.keras.activations.softmax,
-                name="logits")(concat_layer)
+                activation=tf.keras.activations.linear,
+                name="logits")(p_layer)
 
             # Create the value branch model.
             value_layer = tf.keras.layers.Dense(
                 1,
                 name="value_out",
                 activation=tf.keras.activations.tanh,
-                kernel_initializer=normc_initializer(0.01))(concat_layer)
-            self.logits_and_value_model = tf.keras.models.Model(
-                concat_layer, [logits_layer, value_layer])
-            self.logits_and_value_model.summary()
+                kernel_initializer=normc_initializer(0.01))(v_layer)
+            self.logits_model = tf.keras.models.Model(
+                p_layer, [logits_layer])
+            self.value_model = tf.keras.models.Model(
+                v_layer, [value_layer]
+            )
+            self.logits_model.summary()
+            self.value_model.summary()
         else:
             self.num_outputs = self.post_fc_stack.num_outputs
 
@@ -130,29 +153,37 @@ class ComplexInputNetwork(TFModelV2):
                                                    self.new_obs_space, "tf")
         # Push image observations through our CNNs.
         outs = []
+        v_outs = []
         for i, component in enumerate(orig_obs):
             if i in self.cnns:
-                cnn_out, _ = self.cnns[i]({SampleBatch.OBS: component, 'is_training':input_dict['is_training']})
+                cnn_out, _ = self.cnns[i]({SampleBatch.OBS: component})
                 outs.append(cnn_out)
+                v_outs.append(self.cnns[i].value_function())
             elif i in self.one_hot:
                 if component.dtype in [tf.int32, tf.int64, tf.uint8]:
                     outs.append(
                         one_hot(component, self.original_space.spaces[i]))
+                    v_outs.append(
+                        one_hot(component, self.original_space.spaces[i]))
                 else:
                     outs.append(component)
+                    v_outs.append(component)
             else:
                 outs.append(tf.reshape(component, [-1, self.flatten[i]]))
+                v_outs.append(tf.reshape(component, [-1, self.flatten[i]]))
         # Concat all outputs and the non-image inputs.
         out = tf.concat(outs, axis=1)
+        v_out = tf.concat(v_outs, axis=1)
         # Push through (optional) FC-stack (this may be an empty stack).
-        out, _ = self.post_fc_stack({SampleBatch.OBS: out}, [], None)
+        out_p, _ = self.post_fc_stack({SampleBatch.OBS: out}, [], None)
+        out_vf, _ = self.post_fc_stack_vf({SampleBatch.OBS: v_out}, [], None)
 
         # No logits/value branches.
-        if not self.logits_and_value_model:
-            return out, []
+        # if not self.logits_and_value_model:
+        #    return out, []
 
         # Logits- and value branches.
-        logits, values = self.logits_and_value_model(out)
+        logits, values = self.logits_model(out_p), self.value_model(out_vf)
         self._value_out = tf.reshape(values, [-1])
         return logits, []
 
@@ -252,17 +283,30 @@ class CustomVisionNetwork(TFModelV2):
 
         out_size, kernel, stride = filters[-1]
 
-        last_layer = tf.keras.layers.Conv2D(
-            out_size,
-            kernel,
+        p_layer = tf.keras.layers.Conv2D(
+            filters=out_size,
+            kernel_size=kernel,
             strides=(stride, stride),
             padding="valid",
             data_format="channels_last",
-            name="conv{}".format(2*len(filters)))(last_layer)
-        #last_layer = tf.keras.layers.BatchNormalization()(last_layer, training=is_training[0])
-        last_layer = tf.keras.layers.ReLU()(last_layer)
-        last_layer = tf.keras.layers.Flatten(
-            data_format="channels_last")(last_layer)
+            name="conv{}".format(2 * len(filters)))(last_layer)
+        p_layer = tf.keras.layers.ReLU()(p_layer)
+
+        # last_layer = tf1.layers.AveragePooling2D((2,2),(2,2))(last_layer)
+        #p_layer = tf.keras.layers.Flatten(data_format="channels_last")(p_layer)
+
+        v_layer = tf.keras.layers.Conv2D(
+            filters=1,
+            kernel_size=kernel,
+            strides=(stride, stride),
+            padding="valid",
+            data_format="channels_last",
+            name="conv{}".format(2 * len(filters) + 1))(last_layer)
+        v_layer = tf.keras.layers.ReLU()(v_layer)
+
+        # last_layer = tf1.layers.AveragePooling2D((2,2),(2,2))(last_layer)
+        p_layer = tf.keras.layers.Flatten(data_format="channels_last")(p_layer)
+        v_layer = tf.keras.layers.Flatten(data_format="channels_last")(v_layer)
         self.last_layer_is_flattened = True
 
         '''
@@ -274,8 +318,20 @@ class CustomVisionNetwork(TFModelV2):
                 activation=post_fcnet_activation,
                 kernel_initializer=normc_initializer(1.0))(last_layer)
         '''
-        self.num_outputs = last_layer.shape[1]
-        logits_out = last_layer
+        self.num_outputs_p = p_layer.shape[1]
+        self.num_outputs_v = v_layer.shape[1]
+        logits_out = p_layer
+        self._value_out = v_layer
+
+        '''
+        # Add (optional) post-fc-stack after last Conv2D layer.
+        for i, out_size in enumerate(post_fcnet_hiddens):
+            last_layer = tf.keras.layers.Dense(
+                out_size,
+                name="post_fcnet_{}".format(i),
+                activation=post_fcnet_activation,
+                kernel_initializer=normc_initializer(1.0))(last_layer)
+        '''
 
         '''
         # Build the value layers
@@ -319,7 +375,7 @@ class CustomVisionNetwork(TFModelV2):
             value_out = tf.keras.layers.Lambda(
                 lambda x: tf.squeeze(x, axis=[1, 2]))(last_layer)
         '''
-        self.base_model = tf.keras.Model(inputs, [logits_out])
+        self.base_model = tf.keras.Model(inputs, [p_layer, self._value_out])
         self.base_model.summary()
 
     def forward(self, input_dict: Dict[str, TensorType],
@@ -329,7 +385,8 @@ class CustomVisionNetwork(TFModelV2):
         if self.data_format == "channels_first":
             obs = tf.transpose(obs, [0, 2, 3, 1])
         # Explicit cast to float32 needed in eager.
-        model_out = self.base_model(tf.cast(obs, tf.float32))
+        model_out, self._value_out = self.base_model(tf.cast(obs, tf.float32))
+
         # Our last layer is already flat.
         if self.last_layer_is_flattened:
             return model_out, state
@@ -338,7 +395,7 @@ class CustomVisionNetwork(TFModelV2):
             return tf.squeeze(model_out, axis=[1, 2]), state
 
     def value_function(self) -> TensorType:
-        return tf.reshape(self._value_out, [-1])
+        return tf.reshape(self._value_out, [-1, self.num_outputs_v])
 
 
 class CustomVisionNetworkTF(TFModelV2):
@@ -348,7 +405,7 @@ class CustomVisionNetworkTF(TFModelV2):
                          name)
         # Have we registered our vars yet (see `forward`)?
         self._registered = False
-        self.num_outputs = 512#self.model_config["conv_filters"][-1][0]*15*15
+        self.num_outputs = self.model_config["conv_filters"][-1][0]*15*15
 
     @override(ModelV2)
     def forward(self, input_dict, state, seq_lens):
@@ -399,6 +456,7 @@ class CustomVisionNetworkTF(TFModelV2):
                         data_format="channels_last",
                         name="conv{}".format(i * 2 - 1))(last_layer)
                     last_layer = tf1.layers.batch_normalization(last_layer, training=input_dict["is_training"])
+                    '''
                     shortcut = tf1.layers.Conv2D(
                         filters=out_size,
                         kernel_size=(1, 1),
@@ -406,23 +464,38 @@ class CustomVisionNetworkTF(TFModelV2):
                         padding="same",
                         data_format="channels_last",
                         name='skip{}'.format(i))(input_layer)
-                    last_layer = tf1.math.add(shortcut, last_layer)
+                    '''
+                    last_layer = tf1.math.add(input_layer, last_layer)
                     last_layer = tf1.nn.relu(last_layer)
-            '''
+
             out_size, kernel, stride = filters[-1]
 
-            last_layer = tf1.layers.Conv2D(
+            p_layer = tf1.layers.Conv2D(
                 filters=out_size,
                 kernel_size=kernel,
                 strides=(stride, stride),
                 padding="valid",
                 data_format="channels_last",
                 name="conv{}".format(2 * len(filters)))(last_layer)
-            last_layer = tf1.layers.batch_normalization(last_layer, training=input_dict["is_training"])
-            last_layer = tf1.nn.relu(last_layer)
-            '''
+            p_layer = tf1.layers.batch_normalization(p_layer, training=input_dict["is_training"])
+            p_layer = tf1.nn.relu(p_layer)
+
             #last_layer = tf1.layers.AveragePooling2D((2,2),(2,2))(last_layer)
-            last_layer = tf1.layers.Flatten(data_format="channels_last")(last_layer)
+            #p_layer = tf1.layers.Flatten(data_format="channels_last")(p_layer)
+
+            v_layer = tf1.layers.Conv2D(
+                filters=1,
+                kernel_size=kernel,
+                strides=(stride, stride),
+                padding="valid",
+                data_format="channels_last",
+                name="conv{}".format(2 * len(filters)+1))(last_layer)
+            v_layer = tf1.layers.batch_normalization(v_layer, training=input_dict["is_training"])
+            v_layer = tf1.nn.relu(v_layer)
+
+            # last_layer = tf1.layers.AveragePooling2D((2,2),(2,2))(last_layer)
+            p_layer = tf1.layers.Flatten(data_format="channels_last")(p_layer)
+            v_layer = tf1.layers.Flatten(data_format="channels_last")(v_layer)
             self.last_layer_is_flattened = True
 
             '''
@@ -434,8 +507,9 @@ class CustomVisionNetworkTF(TFModelV2):
                     activation=post_fcnet_activation,
                     kernel_initializer=normc_initializer(1.0))(last_layer)
             '''
-            self.num_outputs = last_layer.shape[1]
-            logits_out = last_layer
+            self.num_outputs = p_layer.shape[1]
+            logits_out = p_layer
+            self._value_out = v_layer
 
 
 
@@ -466,4 +540,4 @@ class CustomVisionNetworkTF(TFModelV2):
 
     @override(ModelV2)
     def value_function(self):
-        return tf.reshape(self._value_out, [-1])
+        return tf.reshape(self._value_out, [-1,225])
