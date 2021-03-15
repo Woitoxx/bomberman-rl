@@ -180,6 +180,9 @@ class ComplexInputNetwork(TFModelV2):
         self._value_out = tf.reshape(values, [-1])
         return logits, []
 
+    def value_function(self) -> TensorType:
+        return tf.reshape(self._value_out, [-1])
+
 
 class CustomVisionNetwork(TFModelV2):
     """Generic vision network implemented in ModelV2 API.
