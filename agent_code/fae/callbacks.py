@@ -5,13 +5,16 @@ tf.compat.v1.enable_eager_execution()
 
 
 def setup(self):
-    model_path = '/home/florian/Code/bomberman-rl/agent_code/fae/model-2000'
+    model_path = '/home/florian/Code/bomberman-rl/agent_code/fae/model-2500'
     agent_ids = {'fae','random_agent_0','random_agent_1','random_agent_2'}
     self.available_actions = ['UP', 'DOWN', 'LEFT', 'RIGHT', 'BOMB', 'WAIT']
     model = tf.saved_model.load(model_path)
-    #self.agent = model.signatures['serving_default'].prune("policy_01/Placeholder:0","policy_01/cond_1/Merge:0")
-    #self.agent = model.signatures['serving_default'].prune("policy_01/Placeholder:0", "policy_01/functional_5/logits/BiasAdd:0")
-    self.agent = model.signatures['serving_default'].prune("policy_01/Placeholder:0", "policy_01/cond_1/Merge:0")
+
+    #Action output
+    self.agent = model.signatures['serving_default'].prune("policy_01/Placeholder:0","policy_01/cond_1/Merge:0")
+
+    #Actions distribution output
+    #self.agent = model.signatures['serving_default'].prune("policy_01/Placeholder:0", "policy_01/functional_7/logits/BiasAdd:0")#"policy_01/cond_1/Merge:0")
 
 
 def act(self, game_state: dict):
@@ -30,5 +33,5 @@ def act(self, game_state: dict):
     #a = tf.argmax(a,1)
     a = np.array(a)[0]
     game_state['user_input'] = self.available_actions[a]
-
+    #print(game_state['user_input'])
     return game_state['user_input']
