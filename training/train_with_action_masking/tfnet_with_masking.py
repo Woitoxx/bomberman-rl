@@ -238,7 +238,7 @@ class CustomVisionNetwork(TFModelV2):
         p_layer = tf.keras.layers.ReLU()(p_layer)
 
         v_layer = tf.keras.layers.Conv2D(
-            filters=1,
+            filters=out_size,
             kernel_size=kernel,
             strides=(stride, stride),
             padding="valid",
