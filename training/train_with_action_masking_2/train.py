@@ -2,10 +2,10 @@ import os
 import ray
 from ray.rllib.agents.ppo import PPOTrainer
 from ray.rllib.models import ModelCatalog
-from training.train_with_action_masking.bomberman_multi_env import BombermanEnv
+from training.train_with_action_masking_2.bomberman_multi_env import BombermanEnv
 from ray import tune
 from training.callbacks import MyCallbacks
-from training.train_with_action_masking.tfnet_with_masking import ComplexInputNetwork
+from training.train_with_action_masking_2.tfnet_with_masking import ComplexInputNetwork
 
 
 if __name__ == '__main__':
@@ -25,7 +25,7 @@ if __name__ == '__main__':
 
     def train(config, checkpoint_dir=None):
         trainer = PPOTrainer(config=config, env='BomberMan-v0')
-        trainer.restore('C:\\Users\\Florian\\ray_results\\PPO_BomberMan-v0_2021-03-16_09-20-44984tj3ip\\checkpoint_002770\\checkpoint-2770')
+        #trainer.restore('C:\\Users\\Florian\\ray_results\\PPO_BomberMan-v0_2021-03-16_09-20-44984tj3ip\\checkpoint_002770\\checkpoint-2770')
         iter = 0
 
         #def update_phase(ev):
@@ -46,26 +46,26 @@ if __name__ == '__main__':
             'callbacks': MyCallbacks,
             "use_gae": True,
             'lambda': 0.95,
-            'gamma': 0.98,
+            'gamma': 0.97,
             'kl_coeff': 0.2,
             'vf_loss_coeff' : 0.5,
             'clip_rewards': False,
-            'entropy_coeff': 0.003,
-            'train_batch_size': 32768,#49152,
+            'entropy_coeff': 0.0001,
+            'train_batch_size': 16384,#32768,#49152,
             'sgd_minibatch_size': 64,
             'shuffle_sequences': True,
-            'num_sgd_iter': 10,
+            'num_sgd_iter': 15,
             'num_workers': 2,
             'num_cpus_per_worker': 3,
             'ignore_worker_failures': True,
-            'num_envs_per_worker': 8,
+            'num_envs_per_worker': 4,
             #"model": {
             #    "fcnet_hiddens": [512, 512],
             #},
             "model": {
                 "custom_model": "custom_model",
                 "dim": 15,
-                "conv_filters": [[48, [7, 7], 2],[96, [3,3], 2], [192, [3,3], 2], [192, [1,1], 1]],
+                "conv_filters": [[48, [7, 7], 2], [96, [3,3], 2], [192, [3,3], 2], [192, [1,1], 1]],
                 #"conv_filters": [[64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [2, [1, 1], 1]],
                 #8k run "conv_filters" : [[32, [5,5], 2], [32, [3,3], 2], [64, [3,3], 2], [128, [3,3], 2], [256, [1,1], 1]],
                 "conv_activation" : "relu",
