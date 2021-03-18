@@ -4,8 +4,11 @@ from gym.vector.utils import spaces
 from ray.rllib import MultiAgentEnv
 from ray.rllib.utils.typing import MultiAgentDict
 
-from training.bomberman_multi_env import BombermanEnv
+from training.hierarchical_learning.bomberman_multi_env import BombermanEnv
 
+COIN_OBSERVATION_SPACE = spaces.Box(low=0, high=1, shape=(15, 15, 10))
+CRATE_OBSERVATION_SPACE = spaces.Box(low=0, high=1, shape=(15, 15, 13))
+KILL_OBSERVATION_SPACE = spaces.Box(low=0, high=1, shape=(15, 15, 13))
 
 class HierarchicalBombermanMultiEnv(MultiAgentEnv):
     def __init__(self, agent_ids):
@@ -14,6 +17,7 @@ class HierarchicalBombermanMultiEnv(MultiAgentEnv):
         self.action_space = spaces.Discrete(3)
         self.actions = ['COLLECT', 'DESTROY', 'KILL']
         self.high_level_mode = True
+        self.action_buffer = {}
 
     def reset(self):
         obs = self.flat_env.reset()
@@ -26,41 +30,38 @@ class HierarchicalBombermanMultiEnv(MultiAgentEnv):
 
     def step(self, action_dict: MultiAgentDict) -> Tuple[
         MultiAgentDict, MultiAgentDict, MultiAgentDict, MultiAgentDict]:
+        obs = {}
+        rewards = {}
+        dones = {}
+        infos = {}
+        for agent_name, action in action_dict.items():
+            if agent_name.endswith('_high'):
+                agent = self.flat_env.agents[agent_name]
+                agent_id = f'{agent.low_level_prefix}{agent.high_level_steps}'
+                if self.actions[action] == 'COLLECT':
+                    obs = {agent_id : BombermanEnv.get_observation_from_game_state(agent.last_game_state, self.agent_ids)}
+                elif self.actions[action] == 'DESTROY':
+                    pass
+                elif self.actions[action] == 'KILL':
+                    pass
+                else:
+                    obs = None
+                pass
+            else:
+                #agent_1_high
+                #agent_1_low_1
+                #agent_2_low_5
+                high_level_agent_name = f'{agent_name[:7]}_high'
+                self.action_buffer[high_level_agent_name] = action
+                #agent = self.flat_env.agents[high_level_agent_name]
+                pass
 
-        if self.high_level_mode:
-            obs = {}
-            rewards = {}
-            dones = {}
-            infos = {}
-            for a in action_dict:
-                o, r = self._high_level_step(a, action_dict[a])
-                obs.update(o)
-                rewards.update(r)
-                dones = {"__all__": False}
 
-            return obs, rewards, dones, infos
-        else:
-            self.high_level_mode = True
-            return self._low_level_step(action_dict)
+        if len(self.action_buffer) == len(self.agent_ids):
+            self.action_buffer = {}
+            self.flat_env.step()
+            pass
 
-    def _high_level_step(self, agent, action):
-        #self.low_level_agent_id = "low_level_{}".format(
-        #    self.num_high_level_steps)
-        if self.actions[action] == 'COLLECT':
-            obs = {f'{self.actions[action]}_{agent}': BombermanEnv.get_observation_from_game_state(self.flat_env.agents[agent].last_game_state, self.agent_ids, self.flat_env.current_step)}
-        elif self.actions[action] == 'DESTROY':
-            obs = {f'{self.actions[action]}_{agent}': BombermanEnv.get_observation_from_game_state(self.flat_env.agents[agent].last_game_state, self.agent_ids, self.flat_env.current_step)}
-        elif self.actions[action] == 'KILL':
-            obs = {f'{self.actions[action]}_{agent}': BombermanEnv.get_observation_from_game_state(self.flat_env.agents[agent].last_game_state, self.agent_ids, self.flat_env.current_step)}
-        else:
-            obs = None
-        self.high_level_mode = False
-        return obs, {f'{self.actions[action]}_{agent}':0}
+        dones.update({"__all__": False})
 
-    def _low_level_step(self, action_dict):
-        low_level_action_dict = {}
-        for k,v in action_dict.items():
-            key = k.split('_')
-            key = f'{key[1]}_{key[2]}'
-            low_level_action_dict[key] = v
-        return self.flat_env.step(low_level_action_dict)
+        return obs, rewards, dones, infos
