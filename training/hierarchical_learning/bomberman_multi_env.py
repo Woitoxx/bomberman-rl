@@ -148,7 +148,7 @@ class BombermanEnv(MultiAgentEnv):
             agent.low_level_steps += 1
             if agent.current_mode == "COLLECT":
                 obs[agent.current_sub_id] = get_collect_observation_from_game_state(agent.last_game_state)
-                if agent.aux_score > 0:
+                if agent.aux_score == 1:
                     rewards[agent.current_sub_id] = 1.0
                     dones[agent.current_sub_id] = True
                     agent.crates_destroyed = 0
@@ -162,7 +162,7 @@ class BombermanEnv(MultiAgentEnv):
                     dones[agent.current_sub_id] = False
             elif agent.current_mode == "KILL":
                 obs[agent.current_sub_id] = get_kill_observation_from_game_state(agent.last_game_state)
-                if agent.aux_score > 0:
+                if agent.aux_score >= 5:
                     rewards[agent.current_sub_id] = 1.0
                     dones[agent.current_sub_id] = True
                     agent.crates_destroyed = 0
@@ -172,7 +172,7 @@ class BombermanEnv(MultiAgentEnv):
                     rewards[agent.current_sub_id] = -1.0
                     agent.low_level_steps = 0
                 else:
-                    rewards[agent.current_sub_id] = -0.01
+                    rewards[agent.current_sub_id] = -0.001
                     dones[agent.current_sub_id] = False
             elif agent.current_mode == "DESTROY":
                 obs[agent.current_sub_id] = get_destroy_observation_from_game_state(agent.last_game_state)
