@@ -1,113 +1,112 @@
-import copy
-import random
-
+import os
+import ray
 from ray.rllib.agents.ppo import PPOTrainer
 from ray.rllib.models import ModelCatalog
+from training.hierarchical_learning.hierarchical_bomberman_multi_env import *
 from ray import tune
-from ray.util.client import ray
+from training.hierarchical_learning.callbacks import MyCallbacks
+from training.train_with_action_masking_2.tfnet_with_masking import ComplexInputNetwork
 
-from training.bomberman_multi_env import BombermanEnv
-from training.hierarchical_learning.hierarchical_bomberman_multi_env import HierarchicalBombermanMultiEnv
-from training.tfnet import ComplexInputNetwork
 
 if __name__ == '__main__':
-    phase = 0
-    ray.init(object_store_memory=6000000000)
-    env, henv = BombermanEnv([f'agent_{i}' for i in range(4)]), HierarchicalBombermanMultiEnv([f'agent_{i}' for i in range(4)]),
+    ray.init(
+        _redis_max_memory=1024 * 1024 * 100,num_gpus=1, object_store_memory=10*2**30)
+    env = HierarchicalBombermanMultiEnv([f'agent_{i}_high' for i in range(4)])
+
     ModelCatalog.register_custom_model("custom_model", ComplexInputNetwork)
-    tune.register_env('BomberMan-v0', lambda c: HierarchicalBombermanMultiEnv([f'agent_{i}' for i in range(4)]))
+    tune.register_env('BomberMan-v0', lambda c: HierarchicalBombermanMultiEnv([f'agent_{i}_high' for i in range(4)]))
+
 
     def policy_mapping_fn(agent_id):
-        #if phase == 0:
-        #    return "policy_01"
-        #else:
-        if agent_id.startswith("agent_"):
+        if agent_id.startswith("agent_0_high"):# or np.random.rand() > 0.2:
             return "policy_01"  # Choose 01 policy for agent_01
-        if agent_id.startswith("COLLECT_"):
+        #if agent_id.startswith("agent_0_low_COIN_"):
+        #    return "policy_01_coin"
+        #if agent_id.startswith("agent_0_low_DESTROY_"):
+        #    return "policy_01_destroy"
+        #if agent_id.startswith("agent_0_low_KILL_"):
+        #    return "policy_01_kill"
+        if agent_id[8:].startswith("high"):
             return "policy_02"
-        if agent_id.startswith("DESTROY_"):
-            return "policy_03"
-        if agent_id.startswith("KILL_"):
-            return "policy_04"
-        #else:
-        #    return np.random.choice(["policy_01", "policy_02", "policy_03", "policy_04"], 1,
-        #                            p=[.8, .067, .067, .066])[0]
-
-    def copy_weights(src_policy, dest_policy):
-        P0key_P1val = {}  # temp storage with "policy_0" keys & "policy_1" values
-        for (k, v), (k2, v2) in zip(dest_policy.get_weights().items(),
-                                    src_policy.items()):
-            P0key_P1val[k] = v2
-
-        # set weights
-        dest_policy.set_weights(P0key_P1val)
+        if agent_id.startswith("low_COLLECT_"):
+            return "policy_coin"
+        if agent_id.startswith("low_DESTROY_"):
+            return "policy_destroy"
+        if agent_id.startswith("low_KILL_"):
+            return "policy_kill"
 
     def train(config, checkpoint_dir=None):
-        model_pool = []
-        global phase
-        current_policy = None
         trainer = PPOTrainer(config=config, env='BomberMan-v0')
-        #trainer.restore('C:\\Users\\Florian\\ray_results\\PPO_BomberMan-v0_2021-02-28_15-34-57we64cvop\\checkpoint_2430\\checkpoint-2430')
-        iter = 1
+        #trainer.restore('C:\\Users\\Florian\\ray_results\\PPO_BomberMan-v0_2021-03-16_09-20-44984tj3ip\\checkpoint_002770\\checkpoint-2770')
+        iter = 0
 
-        def update_policies(policy, policyID):
-            if policyID != "policy_01":
-                new_policy = current_policy if random.random() > 0.2 else random.choice(model_pool)
-                copy_weights(new_policy, policy)
+        #def update_phase(ev):
+        #    ev.foreach_env(lambda e: e.set_phase(phase))
 
         while True:
-            result = trainer.train()
-            if iter % 10 == 0:
-                checkpoint = trainer.save()
-                print("checkpoint saved at", checkpoint)
             iter += 1
+            result = trainer.train()
+            if iter % 250 == 0:
+                if not os.path.exists(f'./model-{iter}'):
+                    trainer.get_policy('policy_01').export_model(f'./model-{iter}')
+                else:
+                    print("model already saved")
 
     train(config={
         'env': 'BomberMan-v0',
             "use_critic": True,
-            #'callbacks': MyCallbacks,
+            'callbacks': MyCallbacks,
             "use_gae": True,
             'lambda': 0.95,
-            'gamma': 0.99,
+            'gamma': 0.98,
             'kl_coeff': 0.2,
+            'vf_loss_coeff' : 0.5,
             'clip_rewards': False,
-            'entropy_coeff': 0.001,
-            'train_batch_size': 16384,
+            'entropy_coeff': 0.0001,
+            'train_batch_size': 32768,#49152,
             'sgd_minibatch_size': 64,
             'shuffle_sequences': True,
-            'num_sgd_iter': 8,
-            'num_cpus_per_worker': 4,
+            'num_sgd_iter': 15,
             'num_workers': 2,
+            'num_cpus_per_worker': 2,
             'ignore_worker_failures': True,
-            'num_envs_per_worker': 1,
+            'num_envs_per_worker': 8,
             #"model": {
             #    "fcnet_hiddens": [512, 512],
             #},
             "model": {
                 "custom_model": "custom_model",
-                "dim": 15, "conv_filters": [[48, [5, 5], 2], [64, [3, 3], 2], [64, [3, 3], 2]],
+                "dim": 15,
+                "conv_filters": [[32, [7, 7], 2], [64, [3,3], 2], [128, [3,3], 2], [128, [1,1], 1]],
+                #"conv_filters": [[64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [2, [1, 1], 1]],
+                #8k run "conv_filters" : [[32, [5,5], 2], [32, [3,3], 2], [64, [3,3], 2], [128, [3,3], 2], [256, [1,1], 1]],
                 "conv_activation" : "relu",
                 "post_fcnet_hiddens": [256],
                 "post_fcnet_activation": "relu",
-                     # "fcnet_hiddens": [256,256],
-                # "vf_share_layers": 'true'
+                 #"fcnet_hiddens": [256,256],
+                 "vf_share_layers": 'true'
                  },
-            'rollout_fragment_length': 512,
-            'batch_mode': 'complete_episodes',
+            'rollout_fragment_length': 2048,
+            'batch_mode': 'truncate_episodes',
             'observation_filter': 'NoFilter',
             'num_gpus': 1,
-            'lr': 1e-4,
+            'lr': 3e-4,
+            #"lr_schedule": [[0, 0.0005], [5e6, 0.0005], [5e6+1, 0.0003]],#, [2e7, 0.0003], [2e7+1, 0.0001]],
             'log_level': 'INFO',
             'framework': 'tf',
             #'simple_optimizer': args.simple,
             'multiagent': {
                 "policies": {
-                    "policy_01": (None, env.observation_space, henv.action_space, {}),
+                    "policy_01": (None, env.observation_space, env.action_space, {}),
+                    #"policy_01_coin": (None, COIN_OBSERVATION_SPACE, env.action_space, {}),
+                    #"policy_01_destroy": (None, DESTROY_OBSERVATION_SPACE, env.action_space, {}),
+                    #"policy_01_kill": (None, KILL_OBSERVATION_SPACE, env.action_space, {}),
                     "policy_02": (None, env.observation_space, env.action_space, {}),
-                    "policy_03": (None, env.observation_space, env.action_space, {}),
-                    "policy_04": (None, env.observation_space, env.action_space, {})
+                    "policy_coin": (None, COLLECT_OBSERVATION_SPACE, env.flat_env.action_space, {}),
+                    "policy_destroy": (None, DESTROY_OBSERVATION_SPACE, env.flat_env.action_space, {}),
+                    "policy_kill": (None, KILL_OBSERVATION_SPACE, env.flat_env.action_space, {}),
                 },
-                "policies_to_train": ["policy_01"],
+                "policies_to_train": ["policy_01","policy_coin","policy_destroy","policy_kill"],
                 'policy_mapping_fn':
                     policy_mapping_fn,
             },

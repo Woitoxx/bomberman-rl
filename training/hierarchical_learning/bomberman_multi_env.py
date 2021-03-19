@@ -30,7 +30,10 @@ class Agent:
         self.penalty = 0
 
         self.high_level_steps = 0
-        self.low_level_prefix = f'low_level_{self.name}_'
+        self.low_level_steps = 0
+        self.max_low_level_steps = 3
+        self.low_level_prefix = f'low_'
+        self.current_sub_id = None
         self.current_mode = None
 
         self.last_game_state = None
@@ -52,7 +55,10 @@ class Agent:
         self.is_suicide_bomber = False
 
         self.high_level_steps = 0
-        self.low_level_prefix = f'low_level_{self.name}_'
+        self.low_level_steps = 0
+        self.max_low_level_steps = 3
+        self.low_level_prefix = f'low_'
+        self.current_sub_id = None
         self.current_mode = None
 
         self.last_game_state = None
@@ -70,6 +76,7 @@ class Agent:
     def store_game_state(self, game_state):
         self.last_game_state = game_state
 
+LOW_LEVEL_ACTIONS = ['UP', 'DOWN', 'LEFT', 'RIGHT', 'BOMB', 'WAIT']
 
 class BombermanEnv(MultiAgentEnv):
     running: bool = False
@@ -81,7 +88,7 @@ class BombermanEnv(MultiAgentEnv):
     explosions: List[Explosion]
 
     round_id: str
-    available_actions = ['UP', 'DOWN', 'LEFT', 'RIGHT', 'BOMB', 'WAIT']
+
 
     def __init__(self, agent_ids):
 
@@ -94,7 +101,7 @@ class BombermanEnv(MultiAgentEnv):
                                                spaces.Box(low=0, high=1, shape=(4,)),
                                                #spaces.MultiBinary(3),
                                                #spaces.Box(low=0, high=1, shape=(1,)),
-                                               spaces.MultiBinary(len(self.available_actions))))
+                                               spaces.MultiBinary(len(LOW_LEVEL_ACTIONS))))
         # spaces.Dict({'walls': spaces.MultiBinary(tiles),
         # 'free': spaces.MultiBinary(tiles),
         # 'crates': spaces.MultiBinary(tiles),
@@ -126,7 +133,8 @@ class BombermanEnv(MultiAgentEnv):
         random.shuffle(self.active_agents)
 
         for agent in self.active_agents:
-            self.perform_agent_action(agent, self.available_actions[action_dict[agent.name]])
+            #print(f'Agent {agent.name} {agent.current_sub_id} - Action {LOW_LEVEL_ACTIONS[action_dict[agent.name]]}')
+            self.perform_agent_action(agent, LOW_LEVEL_ACTIONS[action_dict[agent.name]])
 
         # Update arena after handling actions from agents
         self.collect_coins()
@@ -136,24 +144,76 @@ class BombermanEnv(MultiAgentEnv):
         # Set obs, reward, done, info for agents still alive
         # Agents that died during this step will get their next obs, reward, done, info later when the round finishes
         for agent in self.active_agents:
-            rewards[agent.name] = agent.aux_score
-            rewards[agent.name] -= np.average([v.aux_score for k, v in self.agents.items() if k != agent.name])
-            #agent.crates_destroyed = 0# Reset aux score
             agent.store_game_state(self.get_state_for_agent(agent))
-            dones[agent.name] = False
-            obs[agent.name] = get_observation_from_game_state(agent.last_game_state, self.agents.keys())
-            infos[agent.name] = agent.score
+            agent.low_level_steps += 1
+            if agent.current_mode == "COLLECT":
+                obs[agent.current_sub_id] = get_collect_observation_from_game_state(agent.last_game_state)
+                if agent.aux_score > 0:
+                    rewards[agent.current_sub_id] = 1.0
+                    dones[agent.current_sub_id] = True
+                    agent.crates_destroyed = 0
+                    agent.low_level_steps = 0
+                elif agent.low_level_steps >= agent.max_low_level_steps:
+                    dones[agent.current_sub_id] = True
+                    rewards[agent.current_sub_id] = -1.0
+                    agent.low_level_steps = 0
+                else:
+                    rewards[agent.current_sub_id] = -0.01
+                    dones[agent.current_sub_id] = False
+            elif agent.current_mode == "KILL":
+                obs[agent.current_sub_id] = get_kill_observation_from_game_state(agent.last_game_state)
+                if agent.aux_score > 0:
+                    rewards[agent.current_sub_id] = 1.0
+                    dones[agent.current_sub_id] = True
+                    agent.crates_destroyed = 0
+                    agent.low_level_steps = 0
+                elif agent.low_level_steps >= agent.max_low_level_steps:
+                    dones[agent.current_sub_id] = True
+                    rewards[agent.current_sub_id] = -1.0
+                    agent.low_level_steps = 0
+                else:
+                    rewards[agent.current_sub_id] = -0.01
+                    dones[agent.current_sub_id] = False
+            elif agent.current_mode == "DESTROY":
+                obs[agent.current_sub_id] = get_destroy_observation_from_game_state(agent.last_game_state)
+                if agent.crates_destroyed > 0:
+                    rewards[agent.current_sub_id] = 1.0
+                    dones[agent.current_sub_id] = True
+                    agent.crates_destroyed = 0
+                    agent.low_level_steps = 0
+                elif agent.low_level_steps >= agent.max_low_level_steps:
+                    dones[agent.current_sub_id] = True
+                    rewards[agent.current_sub_id] = -1.0
+                    agent.crates_destroyed = 0
+                    agent.low_level_steps = 0
+                else:
+                    rewards[agent.current_sub_id] = -0.01
+                    dones[agent.current_sub_id] = False
+            if dones[agent.current_sub_id]:
+                #print(f'Agent {agent.name} {agent.current_sub_id} finished {agent.current_mode}')
+                obs[agent.name] = get_high_level_observation_from_game_state(agent.last_game_state, self.agents.keys())
+                infos[agent.name] = agent.score
+                rewards[agent.name] = 0#agent.aux_score
+                dones[agent.name] = False
+                #rewards[agent.name] -= np.average([v.aux_score for k, v in self.agents.items() if k != agent.name])
 
         for agent_name in action_dict.keys():
             if agent_name not in map(lambda a: a.name, self.active_agents):
                 agent = self.agents[agent_name]
                 agent.store_game_state(self.get_state_for_agent(agent))
-                self.agents_last_obs[agent_name] = get_observation_from_game_state(agent.last_game_state, self.agents.keys())
-
+                if agent.current_mode == "COLLECT":
+                    self.agents_last_obs[agent.current_sub_id] = get_collect_observation_from_game_state(agent.last_game_state)
+                elif agent.current_mode == "KILL":
+                    self.agents_last_obs[agent.current_sub_id] = get_kill_observation_from_game_state(agent.last_game_state)
+                elif agent.current_mode == "DESTROY":
+                    self.agents_last_obs[agent.current_sub_id] = get_destroy_observation_from_game_state(agent.last_game_state)
+                self.agents_last_obs[agent_name] = get_high_level_observation_from_game_state(agent.last_game_state, self.agents.keys())
+        '''
         for agent in self.agents.values():
             if agent.dead:
                 agent.penalty += agent.aux_score
-                agent.penalty -= np.average([v.aux_score for k, v in self.agents.items() if k != agent.name])
+                agent.penalty -= np.average([v.aux_score for k, v in self.agents.items() if k != agent.name]
+        '''
 
         for agent in self.agents.values():
             agent.aux_score = 0
@@ -169,19 +229,22 @@ class BombermanEnv(MultiAgentEnv):
                 #rewards[a.name] = 0
                 # Add observation for agents that died ealier
                 if a not in self.active_agents:
-                    rewards[a.name] = a.penalty
+                    #rewards[a.name] = a.penalty
                     #a.store_game_state(self.get_state_for_agent(a))
                     #obs[a.name] = get_observation_from_game_state(a.last_game_state, self.agents.keys())
                     obs[a.name] = self.agents_last_obs[a.name]
+                    obs[a.current_sub_id] = self.agents_last_obs[a.current_sub_id]
+                    rewards[a.current_sub_id] = -1
+                dones[a.current_sub_id] = True
+                dones[a.name] = True
                 # Add rewards for all agents based on their final score
                 #if a.name in winner:
                     #rewards[a.name] = 3. / 3**(len(winner)-1)
-                #rewards[a.name] -= np.average([v.score + v.crates_destroyed * 0.05 for k, v in self.agents.items() if k != a.name])
+                rewards[a.name] = a.score - np.average([v.score for k, v in self.agents.items() if k != a.name])
                 #elif a.name in loser:
                 #    rewards[a.name] = -1.
                 #else:
                 #    rewards[a.name] = 0.
-                dones[a.name] = True
                 infos[a.name] = a.score
         else:
             dones['__all__'] = False
@@ -193,7 +256,7 @@ class BombermanEnv(MultiAgentEnv):
         self.agents_last_obs = {}
         for agent in self.active_agents:
             agent.store_game_state(self.get_state_for_agent(agent))
-            obs[agent.name] = get_observation_from_game_state(agent.last_game_state, self.agents.keys())
+            obs[agent.name] = get_high_level_observation_from_game_state(agent.last_game_state, self.agents.keys())
         return obs
 
     def update_step_rewards(self, agent_names):
@@ -279,9 +342,6 @@ class BombermanEnv(MultiAgentEnv):
         # Reset agents and distribute starting positions
         for agent in self.agents.values():
             self.active_agents.append(agent)
-            agent.aux_score = 0
-            agent.crates_destroyed = 0
-            agent.penalty = 0
             agent.x, agent.y = start_positions.pop()
             agent.start_round()
 
@@ -447,27 +507,7 @@ class BombermanEnv(MultiAgentEnv):
         return state
 
 
-def get_available_actions_for_agent(agent, obs_arena):
-    def tile_is_free(x, y):
-        is_free = 0 <= x <= 14 and 0 <= y <= 14 and obs_arena[1][x, y] == 1
-        if is_free:
-            bombs = obs_arena[4:8]
-            pos = bombs[:,x, y]
-            is_free = is_free and not np.any(bombs[:,x, y])
-        return is_free
-
-    x, y = agent[3][0]-1, agent[3][1]-1
-    action_mask = np.zeros(6, dtype=int)
-    action_mask[0] = tile_is_free(x, y - 1)
-    action_mask[1] = tile_is_free(x, y + 1)
-    action_mask[2] = tile_is_free(x - 1, y)
-    action_mask[3] = tile_is_free(x + 1, y)
-    action_mask[4] = agent[2]
-    action_mask[5] = 1
-    return action_mask
-
-
-def get_observation_from_game_state(game_state, agent_ids):
+def get_high_level_observation_from_game_state(game_state, agent_ids):
     field = game_state['field']
     walls = np.where(field == -1, 1, 0)[None, 1:-1, 1:-1]
     free = np.where(field == 0, 1, 0)[None, 1:-1, 1:-1]
@@ -477,22 +517,14 @@ def get_observation_from_game_state(game_state, agent_ids):
     player[game_state['self'][3]] = 1
     player = player[None, 1:-1, 1:-1]
 
-    #scores = np.zeros(4)
-    #scores[0] = game_state['self'][1]
     scores = {game_state['self'][0]: 0}
     scores.update({a: 0 for a in agent_ids if a != game_state['self'][0]})
-    #alives = {a: 0 for a in agent_ids if a != game_state['self'][0]}
     scores[game_state['self'][0]] = game_state['self'][1]
 
     opponents = np.zeros((3,field.shape[0], field.shape[1]), dtype=int)
-    #opp_alive = np.zeros(3)
     for i, o in enumerate(game_state['others']):
         opponents[i,o[3][0],o[3][1]] = 1
-        #opp_alive[i] = 1
-        #alives[o[0]] = 1
-        #scores[i + 1] = o[1]
         scores[o[0]] = o[1]
-    #score_alive[game_state[0]] = (1, game_state['self'][1])
     opponents = opponents[:, 1:-1, 1:-1]
     coins = np.zeros(field.shape, dtype=int)
     for c in game_state['coins']:
@@ -510,10 +542,102 @@ def get_observation_from_game_state(game_state, agent_ids):
     all_ones = np.ones_like(free)
 
     out = np.vstack((walls, free, crates, coins, bombs, player, opponents, explosions, all_ones))
-    #out = np.stack((walls, free, crates, coins, bombs, player, opponents, explosions, all_ones), axis=2)
-    # out = {'walls': walls, 'free': free, 'crates': crates, 'coins': coins, 'bombs': bombs, 'player': player,
-    #        'opponents': opponents, 'explosions': explosions, 'scores': scores / 100., 'current_round': np.array([current_round / 400.])}
+    legal_actions = np.array([len(game_state['coins'])>0, np.any(crates), len(game_state['others'])>0], dtype=int)
     return np.moveaxis(out, 0 , 2), \
            np.array([score for score in scores.values()]) / 24.,\
-           get_available_actions_for_agent(game_state['self'], out)
+           legal_actions
+           #get_available_actions_for_agent(game_state['self'], out)
            #np.array([game_state['current_step'] / 400.0]),\
+
+
+def get_available_actions_for_agent(agent, obs_arena):
+    def tile_is_free(x, y):
+        is_free = 0 <= x <= 14 and 0 <= y <= 14 and obs_arena[0][x, y] == 1
+        if is_free:
+            bombs = obs_arena[2:6]
+            pos = bombs[:,x, y]
+            is_free = is_free and not np.any(bombs[:,x, y])
+        return is_free
+
+    x, y = agent[3][0]-1, agent[3][1]-1
+    action_mask = np.zeros(6, dtype=int)
+    action_mask[0] = tile_is_free(x, y - 1)
+    action_mask[1] = tile_is_free(x, y + 1)
+    action_mask[2] = tile_is_free(x - 1, y)
+    action_mask[3] = tile_is_free(x + 1, y)
+    action_mask[4] = agent[2]
+    action_mask[5] = 1
+    return action_mask
+
+
+def get_common_observation_from_game_state(game_state):
+    field = game_state['field']
+    free = np.where(field == 0, 1, 0)[None, 1:-1, 1:-1]
+
+    player = np.zeros(field.shape, dtype=int)
+    player[game_state['self'][3]] = 1
+    player = player[None, 1:-1, 1:-1]
+
+    bombs = np.zeros((4, field.shape[0], field.shape[1]), dtype=int)
+    for b in game_state['bombs']:
+        bombs[3 - b[1], b[0][0], b[0][1]] = 1
+
+    bombs = bombs[:, 1:-1, 1:-1]
+
+    explosions = game_state['explosion_map'][None, 1:-1, 1:-1]
+
+    all_ones = np.ones_like(free)
+
+    out = np.vstack((free, player, bombs,  explosions, all_ones))
+    return out
+
+
+def get_collect_observation_from_game_state(game_state):
+    obs = get_common_observation_from_game_state(game_state)
+
+    field = game_state['field']
+    blocked = np.where(field != 0, 1, 0)[None, 1:-1, 1:-1]
+
+    opponents = np.zeros((field.shape[0], field.shape[1]), dtype=int)
+    for o in game_state['others']:
+        opponents[o[3][0], o[3][1]] = 1
+    opponents = opponents[None, 1:-1, 1:-1]
+
+    coins = np.zeros(field.shape, dtype=int)
+
+    for c in game_state['coins']:
+        coins[c] = 1
+    coins = coins[None, 1:-1, 1:-1]
+
+    legal_actions = get_available_actions_for_agent(game_state['self'], obs)
+    legal_actions[4] = 0   # Bomb not available
+    return np.moveaxis(np.vstack((obs, blocked, coins, opponents)), 0, 2), legal_actions
+
+
+def get_destroy_observation_from_game_state(game_state):
+    obs = get_common_observation_from_game_state(game_state)
+    field = game_state['field']
+    walls = np.where(field == -1, 1, 0)[None, 1:-1, 1:-1]
+    crates = np.where(field == 1, 1, 0)[None, 1:-1, 1:-1]
+    opponents = np.zeros((field.shape[0], field.shape[1]), dtype=int)
+    for o in game_state['others']:
+        opponents[o[3][0], o[3][1]] = 1
+    opponents = opponents[None, 1:-1, 1:-1]
+
+    legal_actions = get_available_actions_for_agent(game_state['self'], obs)
+    return np.moveaxis(np.vstack((obs, walls, crates, opponents)), 0, 2), legal_actions
+
+
+def get_kill_observation_from_game_state(game_state):
+    obs = get_common_observation_from_game_state(game_state)
+    field = game_state['field']
+    walls = np.where(field == -1, 1, 0)[None, 1:-1, 1:-1]
+    opponents = np.zeros((3, field.shape[0], field.shape[1]), dtype=int)
+    for i, o in enumerate(game_state['others']):
+        opponents[i, o[3][0], o[3][1]] = 1
+    opponents = opponents[:, 1:-1, 1:-1]
+
+    crates = np.where(field == 1, 1, 0)[None, 1:-1, 1:-1]
+
+    legal_actions = get_available_actions_for_agent(game_state['self'], obs)
+    return np.moveaxis(np.vstack((obs, walls, crates, opponents)), 0, 2), legal_actions
