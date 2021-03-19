@@ -31,7 +31,7 @@ class Agent:
 
         self.high_level_steps = 0
         self.low_level_steps = 0
-        self.max_low_level_steps = 3
+        self.max_low_level_steps = 20
         self.low_level_prefix = f'low_'
         self.current_sub_id = None
         self.current_mode = None
@@ -56,7 +56,7 @@ class Agent:
 
         self.high_level_steps = 0
         self.low_level_steps = 0
-        self.max_low_level_steps = 3
+        self.max_low_level_steps = 20
         self.low_level_prefix = f'low_'
         self.current_sub_id = None
         self.current_mode = None
@@ -235,6 +235,10 @@ class BombermanEnv(MultiAgentEnv):
                     obs[a.name] = self.agents_last_obs[a.name]
                     obs[a.current_sub_id] = self.agents_last_obs[a.current_sub_id]
                     rewards[a.current_sub_id] = -1
+
+                if a.name not in obs:
+                    obs[a.name] = get_high_level_observation_from_game_state(a.last_game_state, self.agents.keys())
+
                 dones[a.current_sub_id] = True
                 dones[a.name] = True
                 # Add rewards for all agents based on their final score

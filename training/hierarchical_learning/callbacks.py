@@ -56,7 +56,7 @@ class MyCallbacks(DefaultCallbacks):
             trainer, result["episodes_this_iter"]))
 
         # Add current policy to the menagerie
-        '''
+
         current_policy = trainer.get_policy('policy_01').get_weights()
         if result["policy_reward_mean"]["policy_01"] > 0 or len(self.policies) == 0:
             self.policies.append(current_policy)
@@ -66,16 +66,16 @@ class MyCallbacks(DefaultCallbacks):
         #self.copy_weights(current_policy if np.random.rand() > 0.2 else np.random.choice(self.policies), trainer.get_policy('policy_02'))
 
         # Choose either current policy (80%) or random previous policy (20%) for our opponents
-        new_policy = current_policy if np.random.rand() > 0.2 else random.choice(self.policies)
+        #new_policy = current_policy if np.random.rand() > 0.2 else random.choice(self.policies)
 
-        trainer.workers.foreach_worker(lambda w: w.get_policy('policy_02').set_weights(new_policy))
-        #trainer.workers.foreach_worker(lambda w: self.copy_weights(current_policy if np.random.rand() > 0.2 else np.random.choice(self.policies), w.get_policy('policy_02')))
+        #trainer.workers.foreach_worker(lambda w: w.get_policy('policy_02').set_weights(new_policy))
+        trainer.workers.foreach_worker(lambda w: self.copy_weights(current_policy if np.random.rand() > 0.2 else np.random.choice(self.policies), w.get_policy('policy_02')))
 
         # Checkpoint
         if result["iterations_since_restore"] % 10 == 0:
             print(f'Checkpoint saved at iter {result["iterations_since_restore"]}')
             trainer.save()
-        '''
+
 
 
     def on_postprocess_trajectory(
