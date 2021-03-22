@@ -37,7 +37,7 @@ if __name__ == '__main__':
 
     def train(config, checkpoint_dir=None):
         trainer = PPOTrainer(config=config, env='BomberMan-v0')
-        trainer.restore('C:\\Users\\Florian\\ray_results\\PPO_BomberMan-v0_2021-03-22_10-57-05mz9533ge\\checkpoint_000140\\checkpoint-140')
+        #trainer.restore('/home/florian/ray_results/checkpoint_000330/checkpoint-330')
         iter = 0
 
         #def update_phase(ev):
