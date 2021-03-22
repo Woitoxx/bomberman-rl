@@ -29,7 +29,7 @@ if __name__ == '__main__':
         if agent_id[8:].startswith("high"):
             return "policy_02"
         if agent_id.startswith("low_COLLECT_"):
-            return "policy_coin"
+            return "policy_collect"
         if agent_id.startswith("low_DESTROY_"):
             return "policy_destroy"
         if agent_id.startswith("low_KILL_"):
@@ -37,7 +37,7 @@ if __name__ == '__main__':
 
     def train(config, checkpoint_dir=None):
         trainer = PPOTrainer(config=config, env='BomberMan-v0')
-        #trainer.restore('C:\\Users\\Florian\\ray_results\\PPO_BomberMan-v0_2021-03-16_09-20-44984tj3ip\\checkpoint_002770\\checkpoint-2770')
+        #trainer.restore('/home/florian/ray_results/checkpoint_000330/checkpoint-330')
         iter = 0
 
         #def update_phase(ev):
@@ -45,10 +45,14 @@ if __name__ == '__main__':
 
         while True:
             iter += 1
-            result = trainer.train()
-            if iter % 250 == 0:
+            #result = trainer.train()
+            if iter % 250 == 1:
                 if not os.path.exists(f'./model-{iter}'):
-                    trainer.get_policy('policy_01').export_model(f'./model-{iter}')
+                    #trainer.get_policy('policy_01').export_model(f'./model-{iter}')
+                    trainer.get_policy('policy_01').export_model(f'./model/main/')
+                    trainer.get_policy('policy_collect').export_model(f'./model/collect/')
+                    trainer.get_policy('policy_destroy').export_model(f'./model/destroy/')
+                    trainer.get_policy('policy_kill').export_model(f'./model/kill/')
                 else:
                     print("model already saved")
 
@@ -102,11 +106,11 @@ if __name__ == '__main__':
                     #"policy_01_destroy": (None, DESTROY_OBSERVATION_SPACE, env.action_space, {}),
                     #"policy_01_kill": (None, KILL_OBSERVATION_SPACE, env.action_space, {}),
                     "policy_02": (None, env.observation_space, env.action_space, {}),
-                    "policy_coin": (None, COLLECT_OBSERVATION_SPACE, env.flat_env.action_space, {}),
+                    "policy_collect": (None, COLLECT_OBSERVATION_SPACE, env.flat_env.action_space, {}),
                     "policy_destroy": (None, DESTROY_OBSERVATION_SPACE, env.flat_env.action_space, {}),
                     "policy_kill": (None, KILL_OBSERVATION_SPACE, env.flat_env.action_space, {}),
                 },
-                "policies_to_train": ["policy_01","policy_coin","policy_destroy","policy_kill"],
+                "policies_to_train": ["policy_01","policy_collect","policy_destroy","policy_kill"],
                 'policy_mapping_fn':
                     policy_mapping_fn,
             },
