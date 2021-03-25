@@ -7,7 +7,7 @@ tf.compat.v1.enable_eager_execution()
 
 
 def setup(self):
-    model_path = './model-3000'
+    model_path = './model-11250'
     self.available_actions = ['UP', 'DOWN', 'LEFT', 'RIGHT', 'BOMB', 'WAIT']
     model = tf.saved_model.load(model_path)
 

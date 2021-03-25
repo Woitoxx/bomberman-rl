@@ -5,6 +5,7 @@ from ray.rllib.models import ModelCatalog
 from training.hierarchical_learning.hierarchical_bomberman_multi_env import *
 from ray import tune
 from training.hierarchical_learning.callbacks import MyCallbacks
+from training.hierarchical_learning.tfnet_lstm import ComplexLstmNetwork
 from training.train_with_action_masking_2.tfnet_with_masking import ComplexInputNetwork
 
 
@@ -14,6 +15,7 @@ if __name__ == '__main__':
     env = HierarchicalBombermanMultiEnv([f'agent_{i}_high' for i in range(4)])
 
     ModelCatalog.register_custom_model("custom_model", ComplexInputNetwork)
+    ModelCatalog.register_custom_model("custom_lstm_model", ComplexLstmNetwork)
     tune.register_env('BomberMan-v0', lambda c: HierarchicalBombermanMultiEnv([f'agent_{i}_high' for i in range(4)]))
 
 
@@ -37,7 +39,11 @@ if __name__ == '__main__':
 
     def train(config, checkpoint_dir=None):
         trainer = PPOTrainer(config=config, env='BomberMan-v0')
-        #trainer.restore('/home/florian/ray_results/checkpoint_000330/checkpoint-330')
+        init_w = trainer.get_policy('policy_01').get_weights()
+        trainer.restore('C:\\Users\\Florian\\ray_results\\PPO_BomberMan-v0_2021-03-25_08-56-43eo23nmho\\checkpoint_002360\\checkpoint-2360')
+        trainer.workers.foreach_worker(lambda w: w.get_policy('policy_01').set_weights(init_w))
+        trainer.restore('.\\kill-policy-0\\checkpoint')
+        trainer.import_model()
         iter = 0
 
         #def update_phase(ev):
@@ -46,7 +52,7 @@ if __name__ == '__main__':
         while True:
             iter += 1
             result = trainer.train()
-            if iter % 250 == 0:
+            if iter % 200 == 0:
                 if not os.path.exists(f'./model-{iter}'):
                     #trainer.get_policy('policy_01').export_model(f'./model-{iter}')
                     trainer.export_policy_model(f'./model-{iter}/main', 'policy_01')
@@ -63,7 +69,7 @@ if __name__ == '__main__':
             'callbacks': MyCallbacks,
             "use_gae": True,
             'lambda': 0.95,
-            'gamma': 0.99,
+            'gamma': 0.98,
             'kl_coeff': 0.2,
             'vf_loss_coeff' : 0.5,
             'clip_rewards': False,
@@ -102,7 +108,20 @@ if __name__ == '__main__':
             #'simple_optimizer': args.simple,
             'multiagent': {
                 "policies": {
-                    "policy_01": (None, env.observation_space, env.action_space, {}),
+                    "policy_01": (None, env.observation_space, env.action_space, {
+                        'entropy_coeff': 0.01, 'gamma': 0.999, 'lr': 1e-4, 'num_sgd_iter': 5,
+                        #"model": {
+                        #    'use_lstm': True,
+                        #    "lstm_cell_size": 64,
+                        #    "custom_model": "custom_lstm_model",
+                        #    "dim": 15,
+                        #    "conv_filters": [[32, [7, 7], 2], [64, [3, 3], 2], [128, [3, 3], 2], [128, [1, 1], 1]],
+                        #    "conv_activation": "relu",
+                        #    "post_fcnet_hiddens": [256],
+                        #    "post_fcnet_activation": "relu",
+                        #    "vf_share_layers": 'true'
+                        #},
+                    }),
                     #"policy_01_coin": (None, COIN_OBSERVATION_SPACE, env.action_space, {}),
                     #"policy_01_destroy": (None, DESTROY_OBSERVATION_SPACE, env.action_space, {}),
                     #"policy_01_kill": (None, KILL_OBSERVATION_SPACE, env.action_space, {}),

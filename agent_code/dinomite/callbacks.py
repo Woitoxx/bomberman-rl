@@ -5,9 +5,9 @@ os.environ["CUDA_VISIBLE_DEVICES"]="-1"
 import tensorflow as tf
 tf.compat.v1.enable_eager_execution()
 
+model_path = './model-1000/'
 
 def setup(self):
-    model_path = './model/'
     self.available_actions = ['UP', 'DOWN', 'LEFT', 'RIGHT', 'BOMB', 'WAIT']
     model = tf.saved_model.load(f'{model_path}main')
     model1 = tf.saved_model.load(f'{model_path}collect')
@@ -40,8 +40,8 @@ def act(self, game_state: dict):
     a += mask
     a = tf.nn.softmax(a)
     print(a)
-    a = tf.argmax(a,1)
-    a = np.array(a)[0]
+    #a = tf.argmax(a,1)
+    a = np.random.choice(3, 1, p=np.array(a).reshape(-1))
     if a == 0:
         orig_obs = get_collect_observation_from_game_state(game_state)
         obs = tf.cast(np.concatenate([orig_obs[0].flatten(), orig_obs[1]]).reshape(1, -1),
