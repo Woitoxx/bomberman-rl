@@ -5,15 +5,14 @@ from ray.rllib.models import ModelCatalog
 from training.train_with_action_masking_3.bomberman_multi_env import BombermanEnv
 from ray import tune
 from training.train_with_action_masking_3.callbacks import MyCallbacks
-from training.train_with_action_masking_3.resnet_with_masking import ComplexInputNetwork
-
+from training.train_with_action_masking_3.torchnet_with_masking import ComplexTorchInputNetwork
 
 if __name__ == '__main__':
     ray.init(
         _redis_max_memory=1024 * 1024 * 100,num_gpus=1, object_store_memory=10*2**30)
     env = BombermanEnv([f'agent_{i}' for i in range(4)])
 
-    ModelCatalog.register_custom_model("custom_model", ComplexInputNetwork)
+    ModelCatalog.register_custom_model("custom_model", ComplexTorchInputNetwork)
     tune.register_env('BomberMan-v0', lambda c: BombermanEnv([f'agent_{i}' for i in range(4)]))
 
 
@@ -51,11 +50,11 @@ if __name__ == '__main__':
             'vf_loss_coeff' : 0.5,
             'clip_rewards': False,
             'entropy_coeff': 0.0001,
-            'train_batch_size': 16384,#32768,#49152,
+            'train_batch_size': 2048,#16384,#32768,#49152,
             'sgd_minibatch_size': 64,
             'shuffle_sequences': True,
             'num_sgd_iter': 15,
-            'num_workers': 4,
+            'num_workers': 0,
             #'num_cpus_per_worker': ,
             'ignore_worker_failures': True,
             'num_envs_per_worker': 2,
@@ -81,7 +80,7 @@ if __name__ == '__main__':
             'lr': 3e-4,
             #"lr_schedule": [[0, 0.0005], [5e6, 0.0005], [5e6+1, 0.0003]],#, [2e7, 0.0003], [2e7+1, 0.0001]],
             'log_level': 'INFO',
-            'framework': 'tf',
+            'framework': 'torch',
             #'simple_optimizer': args.simple,
             'multiagent': {
                 "policies": {

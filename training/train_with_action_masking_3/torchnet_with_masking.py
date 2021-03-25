@@ -6,7 +6,7 @@ import numpy as np
 from ray.rllib.models.torch.misc import normc_initializer as \
     torch_normc_initializer, SlimFC, SlimConv2d
 from ray.rllib.models.catalog import ModelCatalog
-from ray.rllib.models.modelv2 import ModelV2
+from ray.rllib.models.modelv2 import ModelV2, restore_original_dimensions
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.models.utils import get_filter_config
 from ray.rllib.utils.annotations import override
@@ -73,6 +73,16 @@ class ComplexTorchInputNetwork(TorchModelV2, nn.Module):
                                                  "relu"),
             "vf_share_layers": 'True'
         }
+        hidden_size = model_config.get("post_fcnet_hiddens", [])
+        self.post_fc_stack = nn.Sequential(
+            SlimFC(concat_size_p, hidden_size[0], activation_fn=None),
+            nn.BatchNorm1d(hidden_size[0]),
+            nn.ReLU())
+        self.post_fc_stack_vf = nn.Sequential(
+            SlimFC(concat_size_v, hidden_size[0], activation_fn=None),
+            nn.BatchNorm1d(hidden_size[0]),
+            nn.ReLU())
+        '''
         self.post_fc_stack = ModelCatalog.get_model_v2(
             Box(float("-inf"),
                 float("inf"),
@@ -94,6 +104,7 @@ class ComplexTorchInputNetwork(TorchModelV2, nn.Module):
             post_fc_stack_config,
             framework="torch",
             name="post_fc_stack")
+        '''
 
         # Actions and value heads.
         self.logits_layer = None
@@ -103,13 +114,13 @@ class ComplexTorchInputNetwork(TorchModelV2, nn.Module):
         if num_outputs:
             # Action-distribution head.
             self.logits_layer = SlimFC(
-                in_size=self.post_fc_stack.num_outputs,
+                in_size=hidden_size[0],
                 out_size=num_outputs,
                 activation_fn=None,
             )
             # Create the value branch model.
             self.value_layer = SlimFC(
-                in_size=self.post_fc_stack_vf.num_outputs,
+                in_size=hidden_size[0],
                 out_size=1,
                 activation_fn='tanh',
                 initializer=torch_normc_initializer(0.01))
@@ -120,6 +131,9 @@ class ComplexTorchInputNetwork(TorchModelV2, nn.Module):
     def forward(self, input_dict, state, seq_lens):
         # Push image observations through our CNNs.
         orig_obs = input_dict["obs"]
+        orig_obs = restore_original_dimensions(input_dict.get("obs"),
+                                               self.new_obs_space, "torch")
+
         outs = []
         v_outs = []
         for i, component in enumerate(orig_obs[:-1]):
@@ -143,16 +157,17 @@ class ComplexTorchInputNetwork(TorchModelV2, nn.Module):
         out = torch.cat(outs, dim=1)
         v_out = torch.cat(v_outs, dim=1)
         # Push through (optional) FC-stack (this may be an empty stack).
-        out_p, _ = self.post_fc_stack({"obs": out}, [], None)
-        out_v, _ = self.post_fc_stack_vf({"obs": v_out}, [], None)
+        out_p = self.post_fc_stack(out)
+        out_v = self.post_fc_stack_vf(v_out)
 
         # No logits/value branches.
         if self.logits_layer is None:
             return out, []
 
         # Logits- and value branches.
-        logits, values = self.logits_layer(out), self.value_layer(out)
-        inf_mask = torch.max(torch.log(orig_obs[-1]), torch.float32.min)
+        logits, values = self.logits_layer(out_p), self.value_layer(out_v)
+        inf = torch.from_numpy(np.array(float('-inf')))
+        inf_mask = torch.maximum(torch.log(orig_obs[-1]), inf)
         self._value_out = torch.reshape(values, [-1])
         return logits + inf_mask, []
 
@@ -190,7 +205,7 @@ class TorchBatchNormModel(TorchModelV2, nn.Module):
                 )
                 in_channels = out_channels
             else:
-                layers.append(ResidualBlock(in_channels, out_channels))
+                layers.append(ResidualBlock(in_channels, out_channels, kernel))
                 in_channels = out_channels
 
         out_channels, kernel, stride = filters[-1]
@@ -203,13 +218,15 @@ class TorchBatchNormModel(TorchModelV2, nn.Module):
 
         v_layer = nn.Sequential(
             SlimConv2d(in_channels, 1, kernel, stride, 0),
-            nn.BatchNorm2d(out_channels),
+            nn.BatchNorm2d(1),
             nn.ReLU()
         )
 
-        self._logits = nn.Sequential(p_layer, nn.Flatten())
-        self._value_branch = nn.Sequential(v_layer, nn.Flatten())
-
+        self._logits = p_layer
+        self._value_branch = v_layer
+        self._flat = nn.Flatten()
+        self.num_outputs_p = w * h * out_channels
+        self.num_outputs_v = w * h
         self._convs = nn.Sequential(*layers)
 
     @override(ModelV2)
@@ -219,14 +236,16 @@ class TorchBatchNormModel(TorchModelV2, nn.Module):
         self._convs.train(mode=input_dict.get("is_training", False))
         self._logits.train(mode=input_dict.get("is_training", False))
         self._value_branch.train(mode=input_dict.get("is_training", False))
-        self._conv_out = self._convs(input_dict["obs"])
-        logits = self._logits(self._conv_out)
+        self._conv_out = self._convs(input_dict.get('obs').permute(0, 3, 1, 2))
+
+        logits = self._flat(self._logits(self._conv_out))
+        val = self._flat(self._value_branch(self._conv_out))
+        self._value_out = val#torch.reshape(val, [-1])
         return logits, []
 
     @override(ModelV2)
     def value_function(self):
-        assert self._hidden_out is not None, "must call forward first!"
-        return torch.reshape(self._value_branch(self._conv_out), [-1])
+        return self._value_out
 
 
 def conv_bn(in_channels, out_channels, *args, **kwargs):
@@ -234,13 +253,13 @@ def conv_bn(in_channels, out_channels, *args, **kwargs):
 
 
 class ResidualBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, activation='relu'):
+    def __init__(self, in_channels, out_channels, kernel, activation='relu'):
         super().__init__()
         self.in_channels, self.out_channels, self.activation = in_channels, out_channels, activation
         self.blocks = nn.Sequential(
-            conv_bn(self.in_channels, self.out_channels, activation_fn=None, stride=1, padding=1),
+            conv_bn(self.in_channels, self.out_channels, kernel=kernel, activation_fn=None, stride=1, padding=1),
             nn.ReLU(),
-            conv_bn(self.out_channels, self.out_channels, activation_fn=None, stride=1, padding=1),
+            conv_bn(self.out_channels, self.out_channels, kernel=kernel, activation_fn=None, stride=1, padding=1),
         )
         self.activate = nn.ReLU(activation)
         self.shortcut = nn.Identity()
