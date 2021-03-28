@@ -66,45 +66,15 @@ class ComplexTorchInputNetwork(TorchModelV2, nn.Module):
                 concat_size_p += self.flatten[i]
                 concat_size_v += self.flatten[i]
 
-        # Optional post-concat FC-stack.
-        post_fc_stack_config = {
-            "fcnet_hiddens": model_config.get("post_fcnet_hiddens", []),
-            "fcnet_activation": model_config.get("post_fcnet_activation",
-                                                 "relu"),
-            "vf_share_layers": 'True'
-        }
         hidden_size = model_config.get("post_fcnet_hiddens", [])
         self.post_fc_stack = nn.Sequential(
-            SlimFC(concat_size_p, hidden_size[0], activation_fn=None),
+            SlimFC(concat_size_p, hidden_size[0], initializer=torch_normc_initializer(1.0), activation_fn=None),
             nn.BatchNorm1d(hidden_size[0]),
             nn.ReLU())
         self.post_fc_stack_vf = nn.Sequential(
-            SlimFC(concat_size_v, hidden_size[0], activation_fn=None),
+            SlimFC(concat_size_v, hidden_size[0], initializer=torch_normc_initializer(1.0), activation_fn=None),
             nn.BatchNorm1d(hidden_size[0]),
             nn.ReLU())
-        '''
-        self.post_fc_stack = ModelCatalog.get_model_v2(
-            Box(float("-inf"),
-                float("inf"),
-                shape=(concat_size_p, ),
-                dtype=np.float32),
-            self.action_space,
-            None,
-            post_fc_stack_config,
-            framework="torch",
-            name="post_fc_stack")
-
-        self.post_fc_stack_vf = ModelCatalog.get_model_v2(
-            Box(float("-inf"),
-                float("inf"),
-                shape=(concat_size_v,),
-                dtype=np.float32),
-            self.action_space,
-            None,
-            post_fc_stack_config,
-            framework="torch",
-            name="post_fc_stack")
-        '''
 
         # Actions and value heads.
         self.logits_layer = None
@@ -116,24 +86,24 @@ class ComplexTorchInputNetwork(TorchModelV2, nn.Module):
             self.logits_layer = SlimFC(
                 in_size=hidden_size[0],
                 out_size=num_outputs,
+                initializer=torch_normc_initializer(0.01),
                 activation_fn=None,
             )
             # Create the value branch model.
             self.value_layer = SlimFC(
                 in_size=hidden_size[0],
                 out_size=1,
-                activation_fn='tanh',
-                initializer=torch_normc_initializer(0.01))
+                initializer=torch_normc_initializer(1.0),
+                activation_fn='tanh',)
         else:
             raise NotImplementedError()
 
     @override(ModelV2)
     def forward(self, input_dict, state, seq_lens):
         # Push image observations through our CNNs.
-        orig_obs = input_dict["obs"]
         orig_obs = restore_original_dimensions(input_dict.get("obs"),
                                                self.new_obs_space, "torch")
-
+        mode = input_dict.get("is_training", False) if input_dict.get("obs").shape[0] > 1 else False
         outs = []
         v_outs = []
         for i, component in enumerate(orig_obs[:-1]):
@@ -157,6 +127,9 @@ class ComplexTorchInputNetwork(TorchModelV2, nn.Module):
         out = torch.cat(outs, dim=1)
         v_out = torch.cat(v_outs, dim=1)
         # Push through (optional) FC-stack (this may be an empty stack).
+
+        self.post_fc_stack.train(mode=mode)
+        self.post_fc_stack_vf.train(mode=mode)
         out_p = self.post_fc_stack(out)
         out_v = self.post_fc_stack_vf(v_out)
 
@@ -166,7 +139,7 @@ class ComplexTorchInputNetwork(TorchModelV2, nn.Module):
 
         # Logits- and value branches.
         logits, values = self.logits_layer(out_p), self.value_layer(out_v)
-        inf = torch.from_numpy(np.array(float('-inf')))
+        inf = torch.from_numpy(np.array(float('-inf'))).to(torch.device('cuda'))
         inf_mask = torch.maximum(torch.log(orig_obs[-1]), inf)
         self._value_out = torch.reshape(values, [-1])
         return logits + inf_mask, []
@@ -233,10 +206,12 @@ class TorchBatchNormModel(TorchModelV2, nn.Module):
     def forward(self, input_dict, state, seq_lens):
         # Set the correct train-mode for our hidden module (only important
         # b/c we have some batch-norm layers).
-        self._convs.train(mode=input_dict.get("is_training", False))
-        self._logits.train(mode=input_dict.get("is_training", False))
-        self._value_branch.train(mode=input_dict.get("is_training", False))
-        self._conv_out = self._convs(input_dict.get('obs').permute(0, 3, 1, 2))
+        obs = input_dict.get('obs').permute(0, 3, 1, 2)
+        mode = input_dict.get("is_training", False) if obs.shape[0] > 1 else False
+        self._convs.train(mode=mode)
+        self._logits.train(mode=mode)
+        self._value_branch.train(mode=mode)
+        self._conv_out = self._convs(obs)
 
         logits = self._flat(self._logits(self._conv_out))
         val = self._flat(self._value_branch(self._conv_out))

@@ -84,6 +84,7 @@ class BombermanEnv(MultiAgentEnv):
         self.phase = 0
         self.observation_space = spaces.Tuple((spaces.Box(low=0, high=1, shape=(15, 15, 14)),
                                                spaces.Box(low=0, high=1, shape=(4,)),
+                                               #spaces.MultiBinary(3),
                                                spaces.Box(low=0, high=1, shape=(1,)),
                                                spaces.MultiBinary(len(self.available_actions))))
         self.action_space = spaces.Discrete(6)
@@ -116,7 +117,6 @@ class BombermanEnv(MultiAgentEnv):
         for agent in self.active_agents:
             rewards[agent.name] = agent.aux_score
             rewards[agent.name] -= np.average([v.aux_score for k, v in self.agents.items() if k != agent.name])
-            #agent.crates_destroyed = 0
             agent.store_game_state(self.get_state_for_agent(agent))
             dones[agent.name] = False
             obs[agent.name] = get_observation_from_game_state(agent.last_game_state, self.agents.keys())
@@ -158,7 +158,6 @@ class BombermanEnv(MultiAgentEnv):
             agent.store_game_state(self.get_state_for_agent(agent))
             obs[agent.name] = get_observation_from_game_state(agent.last_game_state, self.agents.keys())
         return obs
-
 
     def set_phase(self, phase):
         self.phase = phase
@@ -314,10 +313,8 @@ class BombermanEnv(MultiAgentEnv):
         for a in agents_hit:
             a.dead = True
             self.active_agents.remove(a)
-            #if not last_man_standing:
-            #    a.aux_score -= 1
             #if a.is_suicide_bomber:
-                #a.aux_score -= 0.01
+                #a.aux_score -= 0.5
         self.explosions = [exp for exp in self.explosions if exp.active]
 
     def end_round(self):
@@ -379,6 +376,7 @@ def get_available_actions_for_agent(agent, obs_arena):
         is_free = 0 <= x <= 14 and 0 <= y <= 14 and obs_arena[1][x, y] == 1
         if is_free:
             bombs = obs_arena[4:8]
+            pos = bombs[:,x, y]
             is_free = is_free and not np.any(bombs[:,x, y])
         return is_free
 
@@ -403,22 +401,23 @@ def get_observation_from_game_state(game_state, agent_ids):
     player[game_state['self'][3]] = 1
     player = player[None, 1:-1, 1:-1]
 
-    #scores = np.zeros(4)
-    #scores[0] = game_state['self'][1]
     scores = {game_state['self'][0]: 0}
     scores.update({a: 0 for a in agent_ids if a != game_state['self'][0]})
-    #alives = {a: 0 for a in agent_ids if a != game_state['self'][0]}
     scores[game_state['self'][0]] = game_state['self'][1]
 
     opponents = np.zeros((3,field.shape[0], field.shape[1]), dtype=int)
-    #opp_alive = np.zeros(3)
-    for i, o in enumerate(game_state['others']):
-        opponents[i,o[3][0],o[3][1]] = 1
-        #opp_alive[i] = 1
-        #alives[o[0]] = 1
-        #scores[i + 1] = o[1]
-        scores[o[0]] = o[1]
-    #score_alive[game_state[0]] = (1, game_state['self'][1])
+    opp_names = [v for v in agent_ids if v != game_state['self'][0]]
+    opp_alive = dict({o[0]: o for o in game_state['others']})
+    for i, o in enumerate(opp_names):
+        if o in opp_alive.keys():
+            opponents[i, opp_alive[o][3][0], opp_alive[o][3][1]] = 1
+            scores[o] = opp_alive[o][1]
+        else:
+            scores[o] = 0
+    #for i, o in enumerate(game_state['others']):
+    #    opponents[i,o[3][0],o[3][1]] = 1
+    #    scores[o[0]] = o[1]
+
     opponents = opponents[:, 1:-1, 1:-1]
     coins = np.zeros(field.shape, dtype=int)
     for c in game_state['coins']:
@@ -436,11 +435,7 @@ def get_observation_from_game_state(game_state, agent_ids):
     all_ones = np.ones_like(free)
 
     out = np.vstack((walls, free, crates, coins, bombs, player, opponents, explosions, all_ones))
-    #out = np.stack((walls, free, crates, coins, bombs, player, opponents, explosions, all_ones), axis=2)
-    # out = {'walls': walls, 'free': free, 'crates': crates, 'coins': coins, 'bombs': bombs, 'player': player,
-    #        'opponents': opponents, 'explosions': explosions, 'scores': scores / 100., 'current_round': np.array([current_round / 400.])}
     return np.moveaxis(out, 0 , 2), \
            np.array([score for score in scores.values()]) / 24., \
            np.array([game_state['step'] / 400.0]), \
            get_available_actions_for_agent(game_state['self'], out)
-           #\
