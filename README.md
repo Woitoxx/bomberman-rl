@@ -8,6 +8,6 @@ Setup for a project/competition amongst students to train a winning Reinforcemen
 - 'train_with_action_masking_3' contains attempts using a <strong>deep ResNet-like architecture</strong> + action masking
 - 'hierarchical_learning' contains our attempts to implement <strong>hierarchical reinforcement learning</strong>
 - 'train_with_action_masking_dqn' contains our attempts with <strong>Deep Q-Learning</strong> instead of PPO
-- <strong>'train_with_action_masking_final' contains the code the agent we submitted has been trained with</strong>
+- <strong>'train_with_action_masking_final' contains the code our final agent has been trained with</strong> (final agent's code is in 'agent_code/dinomite_v2')
 
 Our implementation uses custom torch/tf models with RLlib. Starting code has been taken from https://docs.ray.io/en/master/rllib-models.html?highlight=custom%20model 
