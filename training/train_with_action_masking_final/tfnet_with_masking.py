@@ -15,6 +15,7 @@ from ray.rllib.utils.typing import ModelConfigDict, TensorType
 
 tf1, tf, tfv = try_import_tf()
 
+
 class ComplexInputNetwork(TFModelV2):
     """TFModelV2 concat'ing CNN outputs to flat input(s), followed by FC(s).
     Note: This model should be used for complex (Dict or Tuple) observation
@@ -28,7 +29,6 @@ class ComplexInputNetwork(TFModelV2):
 
     def __init__(self, obs_space, action_space, num_outputs, model_config,
                  name):
-        # TODO: (sven) Support Dicts as well.
 
         self.original_space = obs_space.original_space if \
             hasattr(obs_space, "original_space") else obs_space
@@ -62,7 +62,6 @@ class ComplexInputNetwork(TFModelV2):
                 self.one_hot[i] = True
                 concat_size_p += component.n
                 concat_size_v += component.n
-            # TODO: (sven) Multidiscrete (see e.g. our auto-LSTM wrappers).
             # Everything else (1D Box).
             else:
                 self.flatten[i] = int(np.product(component.shape))
@@ -183,9 +182,6 @@ class CustomVisionNetwork(TFModelV2):
     via the config keys:
     `post_fcnet_hiddens`: Dense layer sizes after the Conv2D stack.
     `post_fcnet_activation`: Activation function to use for this FC stack.
-
-    Examples:
-
 
     """
 

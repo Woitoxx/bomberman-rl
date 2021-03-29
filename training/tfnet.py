@@ -35,7 +35,6 @@ class ComplexInputNetwork(TFModelV2):
 
     def __init__(self, obs_space, action_space, num_outputs, model_config,
                  name):
-        # TODO: (sven) Support Dicts as well.
 
         self.original_space = obs_space.original_space if \
             hasattr(obs_space, "original_space") else obs_space
@@ -78,7 +77,6 @@ class ComplexInputNetwork(TFModelV2):
                 self.one_hot[i] = True
                 concat_size_p += component.n
                 concat_size_v += component.n
-            # TODO: (sven) Multidiscrete (see e.g. our auto-LSTM wrappers).
             # Everything else (1D Box).
             else:
                 self.flatten[i] = int(np.product(component.shape))

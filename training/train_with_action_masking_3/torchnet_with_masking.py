@@ -1,11 +1,8 @@
 from gym.spaces import Box, Discrete, Tuple
 import numpy as np
 
-# TODO (sven): add IMPALA-style option.
-# from ray.rllib.examples.models.impala_vision_nets import TorchImpalaVisionNet
 from ray.rllib.models.torch.misc import normc_initializer as \
     torch_normc_initializer, SlimFC, SlimConv2d
-from ray.rllib.models.catalog import ModelCatalog
 from ray.rllib.models.modelv2 import ModelV2, restore_original_dimensions
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.models.utils import get_filter_config
@@ -19,7 +16,6 @@ torch, nn = try_import_torch()
 class ComplexTorchInputNetwork(TorchModelV2, nn.Module):
     def __init__(self, obs_space, action_space, num_outputs, model_config,
                  name):
-        # TODO: (sven) Support Dicts as well.
         self.original_space = obs_space.original_space if \
             hasattr(obs_space, "original_space") else obs_space
         assert isinstance(self.original_space, (Tuple)), \

@@ -7,7 +7,7 @@ tf.compat.v1.enable_eager_execution()
 
 
 def setup(self):
-    model_path = './model-7600'
+    model_path = './model-3200'
     self.available_actions = ['UP', 'DOWN', 'LEFT', 'RIGHT', 'BOMB', 'WAIT']
     model = tf.saved_model.load(model_path)
 
@@ -36,14 +36,14 @@ def act(self, game_state: dict):
     mask = tf.cast(np.abs(orig_obs[-1]-1), dtype=tf.float32)
     a = a + mask * tf.float32.min
     a = tf.nn.softmax(a)
-    print(a)
+    #print(a)
     #a = np.array(a).reshape(-1)
     #action = np.random.choice(np.arange(6), p=a)
     #game_state['user_input'] =  self.available_actions[action]
     a = tf.argmax(a,1)
     a = np.array(a)[0]
     game_state['user_input'] = self.available_actions[a]
-    print(game_state['user_input'])
+    #print(game_state['user_input'])
     return game_state['user_input']
 
 def get_available_actions_for_agent(agent, obs_arena):
