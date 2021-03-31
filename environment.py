@@ -3,7 +3,6 @@ import pickle
 import random
 from collections import namedtuple
 from datetime import datetime
-from logging.handlers import RotatingFileHandler
 from os.path import dirname
 from threading import Event
 from time import time

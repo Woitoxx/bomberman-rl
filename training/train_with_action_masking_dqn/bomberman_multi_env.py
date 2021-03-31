@@ -82,22 +82,10 @@ class BombermanEnv(MultiAgentEnv):
         self.agents = {}
         self.agents_last_obs = {}
         self.phase = 0
+        # self.observation_space = spaces.Box(low=0, high=1, shape=(15* 15* 7 + 1 + 3,))
         self.observation_space = spaces.Box(low=0, high=1, shape=(15* 15* 14 + 4 + 6,))
-        # spaces.Dict({'walls': spaces.MultiBinary(tiles),
-        # 'free': spaces.MultiBinary(tiles),
-        # 'crates': spaces.MultiBinary(tiles),
-        # 'player': spaces.MultiBinary(tiles),
-        # 'opponents': spaces.MultiBinary(tiles),
-        # 'coins': spaces.MultiBinary(tiles),
-        # 'bombs': spaces.Box(low=0, high=4, shape=(17, 17)),
-        # 'explosions': spaces.Box(low=0, high=2, shape=(17, 17)),
-        # 'scores' : spaces.Box(low=0, high=1, shape=(4,)),
-        # 'current_round': spaces.Box(low=0, high=1, shape=(1,))
-        # })
-        # spaces.Box(low=0, high=4, shape=(17,17,8))
         self.action_space = spaces.Discrete(6)
         for i in agent_ids:
-            #agent_id = f'agent_{i}'  # _{uuid.uuid1()}'
             self.agents[i] = Agent(i)
         self.new_round()
 
@@ -149,26 +137,11 @@ class BombermanEnv(MultiAgentEnv):
         if self.done():
             self.end_round()
             dones['__all__'] = True
-            # Determine winner and losers
-            # winner can only contain a single agent with the highest score
-            # loser contains agents without the highest score
-            winner, loser = self.get_winner_loser()
             for a in self.agents.values():
-                #rewards[a.name] = 0
                 # Add observation for agents that died ealier
                 if a not in self.active_agents:
                     rewards[a.name] = a.penalty
-                    #a.store_game_state(self.get_state_for_agent(a))
-                    #obs[a.name] = get_observation_from_game_state(a.last_game_state, self.agents.keys())
                     obs[a.name] = self.agents_last_obs[a.name]
-                # Add rewards for all agents based on their final score
-                #if a.name in winner:
-                    #rewards[a.name] = 3. / 3**(len(winner)-1)
-                #rewards[a.name] -= np.average([v.score + v.crates_destroyed * 0.05 for k, v in self.agents.items() if k != a.name])
-                #elif a.name in loser:
-                #    rewards[a.name] = -1.
-                #else:
-                #    rewards[a.name] = 0.
                 dones[a.name] = True
                 infos[a.name] = a.score
         else:
@@ -338,8 +311,9 @@ class BombermanEnv(MultiAgentEnv):
                         for c in self.coins:
                             if (c.x, c.y) == (x, y):
                                 c.collectable = True
-                        bomb.owner.crates_destroyed += 1
+                        # bomb.owner.crates_destroyed += 1
                         #bomb.owner.aux_score += 0.05
+                        bomb.owner.aux_score += 0.001
 
                 # Create explosion
                 screen_coords = [(s.GRID_OFFSET[0] + s.GRID_SIZE * x, s.GRID_OFFSET[1] + s.GRID_SIZE * y) for (x, y) in
@@ -465,22 +439,14 @@ def get_observation_from_game_state(game_state, agent_ids):
     player[game_state['self'][3]] = 1
     player = player[None, 1:-1, 1:-1]
 
-    #scores = np.zeros(4)
-    #scores[0] = game_state['self'][1]
     scores = {game_state['self'][0]: 0}
     scores.update({a: 0 for a in agent_ids if a != game_state['self'][0]})
-    #alives = {a: 0 for a in agent_ids if a != game_state['self'][0]}
     scores[game_state['self'][0]] = game_state['self'][1]
 
     opponents = np.zeros((3,field.shape[0], field.shape[1]), dtype=int)
-    #opp_alive = np.zeros(3)
     for i, o in enumerate(game_state['others']):
         opponents[i,o[3][0],o[3][1]] = 1
-        #opp_alive[i] = 1
-        #alives[o[0]] = 1
-        #scores[i + 1] = o[1]
         scores[o[0]] = o[1]
-    #score_alive[game_state[0]] = (1, game_state['self'][1])
     opponents = opponents[:, 1:-1, 1:-1]
     coins = np.zeros(field.shape, dtype=int)
     for c in game_state['coins']:
@@ -498,10 +464,6 @@ def get_observation_from_game_state(game_state, agent_ids):
     all_ones = np.ones_like(free)
 
     out = np.vstack((walls, free, crates, coins, bombs, player, opponents, explosions, all_ones))
-    #out = np.stack((walls, free, crates, coins, bombs, player, opponents, explosions, all_ones), axis=2)
-    # out = {'walls': walls, 'free': free, 'crates': crates, 'coins': coins, 'bombs': bombs, 'player': player,
-    #        'opponents': opponents, 'explosions': explosions, 'scores': scores / 100., 'current_round': np.array([current_round / 400.])}
     return np.concatenate((np.moveaxis(out, 0 , 2).flatten(),
            np.array([score for score in scores.values()]) / 24.,
            get_available_actions_for_agent(game_state['self'], out)))
-           #np.array([game_state['current_step'] / 400.0]),\

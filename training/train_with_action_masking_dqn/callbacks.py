@@ -32,12 +32,8 @@ class MyCallbacks(DefaultCallbacks):
 
     def on_sample_end(self, worker: RolloutWorker, samples: SampleBatch,
                       **kwargs):
-        #print(f'Player max score: {np.max(self.player_scores) if len(self.player_scores)>0 else 0}')
-        #print(f'Player avg score: {np.average(self.player_scores) if len(self.player_scores)>0 else 0}')
-        #print(f'Opp max score: {np.max(self.opponent_scores) if len(self.opponent_scores)>0 else 0}')
-        #print(f'Opp avg score: {np.average(self.opponent_scores) if len(self.opponent_scores)>0 else 0}')
-        #self.player_scores.clear()
-        #self.opponent_scores.clear()
+        self.player_scores.clear()
+        self.opponent_scores.clear()
         pass
 
     @staticmethod

@@ -5,8 +5,18 @@ from ray.rllib.models import ModelCatalog
 from training.train_with_action_masking_dqn.bomberman_multi_env import BombermanEnv
 from ray import tune
 
+from typing import List
+
+import events as e
+
 from training.train_with_action_masking_dqn.callbacks import MyCallbacks
 from training.train_with_action_masking_dqn.tfnet_with_masking import ComplexInputNetwork
+
+# Custom Events
+MOVED_TO_SAFETY = "MOVED_TO_SAFETY"
+KILLED_LEADER = "KILLED_LEADER"
+IN_DANGER_ZONE = "IN_DANGER_ZONE"
+STEP_PENALTY = "STEP_PENALTY"
 
 if __name__ == '__main__':
     ray.init(
@@ -18,28 +28,81 @@ if __name__ == '__main__':
 
 
     def policy_mapping_fn(agent_id):
-        #if agent_id.startswith("agent_0"):  # or np.random.rand() > 0.2:
-        #    return "policy_01"  # Choose 01 policy for agent_01
-        #else:
-        #    return "policy_02"
         return "policy_01"
 
     def train(config, checkpoint_dir=None):
         trainer = DQNTrainer(config=config, env='BomberMan-v0')
-        # trainer.restore('C:\\Users\\Florian\\ray_results\\PPO_BomberMan-v0_2021-03-16_09-20-44984tj3ip\\checkpoint_002770\\checkpoint-2770')
         iter = 0
-
-        # def update_phase(ev):
-        #    ev.foreach_env(lambda e: e.set_phase(phase))
 
         while True:
             iter += 1
             result = trainer.train()
-            if iter % 250 == 0:
+            if iter % 10 == 0:
                 if not os.path.exists(f'./model-{iter}'):
                     trainer.get_policy('policy_01').export_model(f'./model-{iter}')
                 else:
                     print("model already saved")
+
+
+    def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
+        # Always added
+        events.append(STEP_PENALTY)
+
+        # Only add when opponent is killed by agent and it had the highest score
+        max_score = 0
+        highest_score_killed = False
+        for opponent in old_game_state['others']:
+            if max_score < opponent[1]:
+                max_score = opponent[1]
+        for opponent in new_game_state['others']:
+            if max_score> opponent[1]:
+                highest_score_killed = True
+        if events.__contains__("KILLED_OPPONENT") & highest_score_killed:
+            events.append(KILLED_LEADER)
+
+        # Still to add: MOVED_TO_SAFETY and IN_DANGER_ZONE
+
+    # Not currently used, setup for more nuanced event-system
+    def reward_from_events(self, events: List[str]) -> int:
+        """
+        *This is not a required function, but an idea to structure your code.*
+
+        Here you can modify the rewards your agent get so as to en/discourage
+        certain behavior.
+        """
+        game_rewards = {
+            # Rewards
+            e.MOVED_UP: 0.1,
+            e.MOVED_DOWN: 0.1,
+            e.MOVED_RIGHT: 0.1,
+            e.MOVED_LEFT: 0.1,
+            e.WAITED: 0.05,
+
+            e.BOMB_DROPPED: 0.2,
+            e.CRATE_DESTROYED: 0.15,
+            e.COIN_FOUND: 0.2,
+            e.COIN_COLLECTED: 0.3,
+
+            e.KILLED_OPPONENT: 1.0,
+            e.SURVIVED_ROUND: 1.0,
+            e.OPPONENT_ELIMINATED: 0.2,
+
+            # Penalties
+            e.INVALID_ACTION: -0.1,
+
+            e.GOT_KILLED: -0.5,
+            e.KILLED_SELF: -0.5,
+
+            #Custom
+            KILLED_LEADER: 0.2,
+            STEP_PENALTY: -0.01
+        }
+        reward_sum = 0
+        for event in events:
+            if event in game_rewards:
+                reward_sum += game_rewards[event]
+        self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
+        return reward_sum
 
 
     train(config={
@@ -52,14 +115,14 @@ if __name__ == '__main__':
         # control the initial value of noisy nets
         "sigma0": 0.5,
         # Whether to use dueling dqn
-        "dueling": False,
+        "dueling": True,
         # Dense-layer setup for each the advantage branch and the value branch
         # in a dueling architecture.
         "hiddens": [256],
         # Whether to use double dqn
-        "double_q": False,
+        "double_q": True,
         # N-step Q learning
-        "n_step": 1,
+        "n_step": 5,
 
         # === Exploration Settings ===
         "exploration_config": {
@@ -85,15 +148,16 @@ if __name__ == '__main__':
         # not affect learning, only the length of iterations.
         "timesteps_per_iteration": 10000,
         # Update the target network every `target_network_update_freq` steps.
-        "target_network_update_freq": 5000,
+        "target_network_update_freq": 3000,
         # === Replay buffer ===
         # Size of the replay buffer. Note that if async_updates is set, then
         # each worker will have a replay buffer of this size.
         "buffer_size": 50000,
         # The number of contiguous environment steps to replay at once. This may
-        # be set to greater than 1 to support recurrent models.
+        # be set to greater than 1 to support recurrent models-dqn.
         "replay_sequence_length": 1,
         # If True prioritized replay buffer will be used.
+        # "prioritized_replay": False,
         "prioritized_replay": True,
         # Alpha parameter for prioritized replay buffer.
         "prioritized_replay_alpha": 0.6,
@@ -122,7 +186,7 @@ if __name__ == '__main__':
         # Learning rate schedule
         "lr_schedule": None,
         # Adam epsilon hyper parameter
-        "adam_epsilon": 1e-8,
+        "adam_epsilon": 1e-4,
         # If not None, clip gradients during optimization at this value
         "grad_clip": 40,
         # How many steps of the model to sample before learning starts.
@@ -134,12 +198,11 @@ if __name__ == '__main__':
         # if async_updates is set, then each worker returns gradients for a
         # batch of this size.
         "train_batch_size": 32,
-        #"q_hiddens": 6,
         "model": {
             #"custom_model": "custom_model",
             "dim": 15,
             #"conv_filters": [[48, [7, 7], 2], [96, [3, 3], 2], [192, [3, 3], 2], [192, [1, 1], 1]],
-            # "conv_filters": [[64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [2, [1, 1], 1]],
+            "conv_filters": [[64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [64, [3, 3], 1], [2, [1, 1], 1]],
             # 8k run "conv_filters" : [[32, [5,5], 2], [32, [3,3], 2], [64, [3,3], 2], [128, [3,3], 2], [256, [1,1], 1]],
             "conv_activation": "relu",
             "fcnet_hiddens" : [256,256],
